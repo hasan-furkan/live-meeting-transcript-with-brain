@@ -332,6 +332,7 @@ mod tests {
                 raw: None,
             },
             screenshot: ScreenshotStatus::Off,
+            image: None,
         };
         assert_eq!(
             notification_for(&event),
@@ -355,6 +356,7 @@ mod tests {
                 raw: Some("not json at all".to_string()),
             },
             screenshot: ScreenshotStatus::Off,
+            image: None,
         };
         assert_eq!(
             notification_for(&event),
@@ -375,6 +377,7 @@ mod tests {
                 raw: None,
             },
             screenshot: ScreenshotStatus::Off,
+            image: None,
         };
         let (_, body) = notification_for(&event).unwrap();
         assert_eq!(body.chars().count(), 200);

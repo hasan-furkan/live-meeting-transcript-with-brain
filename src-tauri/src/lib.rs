@@ -90,6 +90,7 @@ pub fn run() {
             commands::start_session,
             commands::stop_session,
             commands::ask_now,
+            commands::capture_and_ask,
             commands::retry_summary,
             commands::model_status,
             commands::download_model,

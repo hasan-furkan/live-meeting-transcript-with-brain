@@ -8,6 +8,7 @@ vi.mock('../api', () => ({
   startSession: vi.fn(async () => {}),
   stopSession: vi.fn(async () => {}),
   askNow: vi.fn(async () => {}),
+  captureAndAsk: vi.fn(async () => {}),
   retrySummary: vi.fn(async () => {}),
   openScreenRecordingSettings: vi.fn(async () => {}),
 }))
@@ -49,6 +50,7 @@ test('analysis_event_renders_card_newest_first', () => {
       raw: null,
     },
     screenshot: 'off',
+    image: null,
   })
   send({ type: 'AnalysisStarted', id: 2, reason: 'question' })
   send({
@@ -63,6 +65,7 @@ test('analysis_event_renders_card_newest_first', () => {
       raw: null,
     },
     screenshot: 'off',
+    image: null,
   })
   send({ type: 'AnalysisStarted', id: 3, reason: 'question' })
   send({
@@ -77,6 +80,7 @@ test('analysis_event_renders_card_newest_first', () => {
       raw: 'raw text',
     },
     screenshot: 'off',
+    image: null,
   })
   const cards = screen.getAllByTestId('analysis-card')
   expect(cards[0]).toHaveTextContent('raw text')
@@ -95,15 +99,57 @@ test('analysis_card_shows_the_screenshot_status', () => {
     raw: null,
   }
   send({ type: 'AnalysisStarted', id: 1, reason: 'manual' })
-  send({ type: 'Analysis', id: 1, time: '10:00', analysis, screenshot: 'attached' })
+  send({ type: 'Analysis', id: 1, time: '10:00', analysis, screenshot: 'attached', image: null })
   send({ type: 'AnalysisStarted', id: 2, reason: 'manual' })
-  send({ type: 'Analysis', id: 2, time: '10:01', analysis, screenshot: 'failed' })
+  send({ type: 'Analysis', id: 2, time: '10:01', analysis, screenshot: 'failed', image: null })
   send({ type: 'AnalysisStarted', id: 3, reason: 'manual' })
-  send({ type: 'Analysis', id: 3, time: '10:02', analysis, screenshot: 'off' })
+  send({ type: 'Analysis', id: 3, time: '10:02', analysis, screenshot: 'off', image: null })
   const cards = screen.getAllByTestId('analysis-card')
   expect(cards[0]).not.toHaveTextContent('screenshot')
   expect(cards[1]).toHaveTextContent('📷 screenshot failed')
   expect(cards[2]).toHaveTextContent('📷 with screenshot')
+})
+
+test('capture_and_ask_button_calls_the_command_while_running', async () => {
+  vi.mocked(api.listCourses).mockResolvedValue(['Algorithms 101'])
+  render(<Main />)
+  fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Algorithms 101' }))
+  await screen.findByRole('button', { name: 'Stop' })
+  const button = screen.getByRole('button', { name: 'Capture & ask' })
+  expect(button).toHaveAttribute(
+    'title',
+    'Takes a screenshot of the selected region (or the whole screen) and asks about it',
+  )
+  fireEvent.click(button)
+  await waitFor(() => expect(api.captureAndAsk).toHaveBeenCalled())
+})
+
+test('screenshot_thumbnail_opens_and_closes_the_overlay', () => {
+  render(<Main />)
+  const url = 'data:image/jpeg;base64,AAAA'
+  send({ type: 'AnalysisStarted', id: 1, reason: 'capture' })
+  send({
+    type: 'Analysis',
+    id: 1,
+    time: '10:00',
+    analysis: {
+      question: 'Q',
+      suggested_answer: 'A',
+      confidence: null,
+      explanation: null,
+      raw: null,
+    },
+    screenshot: 'attached',
+    image: url,
+  })
+  const alt = 'Screenshot sent with the question'
+  expect(screen.getAllByAltText(alt)).toHaveLength(1)
+  fireEvent.click(screen.getByAltText(alt))
+  const overlayImages = screen.getAllByAltText(alt)
+  expect(overlayImages).toHaveLength(2)
+  fireEvent.keyDown(window, { key: 'Escape' })
+  expect(screen.getAllByAltText(alt)).toHaveLength(1)
 })
 
 test('explanation_renders_only_when_present', () => {
@@ -121,6 +167,7 @@ test('explanation_renders_only_when_present', () => {
       raw: null,
     },
     screenshot: 'off',
+    image: null,
   })
   expect(screen.getByText('The question asks what a heap is.')).toBeInTheDocument()
 
@@ -137,6 +184,7 @@ test('explanation_renders_only_when_present', () => {
       raw: null,
     },
     screenshot: 'off',
+    image: null,
   })
   const cards = screen.getAllByTestId('analysis-card')
   expect(cards[0]).toHaveTextContent('A2')

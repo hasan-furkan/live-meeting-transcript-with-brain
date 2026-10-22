@@ -262,6 +262,18 @@ pub fn ask_now(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn capture_and_ask(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    lock(&state.gate).require_running()?;
+    let session = lock(&state.session);
+    let Some(session) = session.as_ref() else {
+        return Err(NO_SESSION.to_string());
+    };
+    session.capture_and_ask();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn retry_summary(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     // A live session's summary arrives at Stop; retrying now would write a premature one.

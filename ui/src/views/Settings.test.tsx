@@ -76,6 +76,17 @@ test('refocus_keeps_region_from_picker_and_unsaved_edits', async () => {
   expect(saved?.model).toBe('edited-model')
 })
 
+test('editing_shows_unsaved_and_saving_shows_saved', async () => {
+  render(<Settings />)
+  await screen.findByText('Key saved')
+  expect(screen.queryByText('Unsaved changes — press Save (or Enter)')).toBeNull()
+  fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'edited-model' } })
+  expect(screen.getByText('Unsaved changes — press Save (or Enter)')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  expect(await screen.findByText('Saved ✓')).toBeInTheDocument()
+  expect(screen.queryByText('Unsaved changes — press Save (or Enter)')).toBeNull()
+})
+
 test('settings_save_sends_trimmed_nonempty_variants', async () => {
   render(<Settings />)
   fireEvent.change(await screen.findByLabelText('Name variants'), {

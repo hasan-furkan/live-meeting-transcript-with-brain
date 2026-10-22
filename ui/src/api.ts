@@ -15,6 +15,7 @@ export const listCourses = () => invoke<string[]>('list_courses')
 export const startSession = (course: string) => invoke('start_session', { course })
 export const stopSession = () => invoke('stop_session')
 export const askNow = () => invoke('ask_now')
+export const captureAndAsk = () => invoke('capture_and_ask')
 export const retrySummary = () => invoke('retry_summary')
 export const modelStatus = () => invoke<ModelStatus>('model_status')
 // Always a fresh download: Settings is also the recovery path for a corrupt model.

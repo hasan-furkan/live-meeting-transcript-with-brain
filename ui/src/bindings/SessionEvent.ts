@@ -4,4 +4,8 @@ import type { Backend } from "./Backend";
 import type { HitKind } from "./HitKind";
 import type { ScreenshotStatus } from "./ScreenshotStatus";
 
-export type SessionEvent = { "type": "Partial", text: string, } | { "type": "Line", time: string, text: string, } | { "type": "Hit", kind: HitKind, term: string, context: string, } | { "type": "AnalysisStarted", id: number, reason: string, } | { "type": "Analysis", id: number, time: string, analysis: Analysis, screenshot: ScreenshotStatus, } | { "type": "AnalysisFailed", id: number, error: string, } | { "type": "QuestionDetected", text: string, } | { "type": "Level", rms: number, } | { "type": "NoAudio" } | { "type": "Backend", backend: Backend, } | { "type": "SummaryWritten", path: string, } | { "type": "SummaryFailed", error: string, } | { "type": "Error", message: string, };
+export type SessionEvent = { "type": "Partial", text: string, } | { "type": "Line", time: string, text: string, } | { "type": "Hit", kind: HitKind, term: string, context: string, } | { "type": "AnalysisStarted", id: number, reason: string, } | { "type": "Analysis", id: number, time: string, analysis: Analysis, screenshot: ScreenshotStatus, 
+/**
+ * The exact image sent to the LLM, as a data URL.
+ */
+image: string | null, } | { "type": "AnalysisFailed", id: number, error: string, } | { "type": "QuestionDetected", text: string, } | { "type": "Level", rms: number, } | { "type": "NoAudio" } | { "type": "Backend", backend: Backend, } | { "type": "SummaryWritten", path: string, } | { "type": "SummaryFailed", error: string, } | { "type": "Error", message: string, };

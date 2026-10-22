@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   askNow,
+  captureAndAsk,
   onSessionEvent,
   openScreenRecordingSettings,
   retrySummary,
@@ -21,6 +22,7 @@ type Card = {
   time: string
   analysis?: Analysis
   screenshot?: ScreenshotStatus
+  image?: string | null
   error?: string
   reason?: string
 }
@@ -44,7 +46,17 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
   const [noAudio, setNoAudio] = useState(false)
   const [error, setError] = useState('')
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [zoom, setZoom] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLOListElement>(null)
+
+  useEffect(() => {
+    if (!zoom) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setZoom(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoom])
 
   // The header also renders on Settings, where Main stays mounted but hidden.
   useEffect(() => {
@@ -79,6 +91,7 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
             time: event.time,
             analysis: event.analysis,
             screenshot: event.screenshot,
+            image: event.image,
           })
           break
         case 'AnalysisFailed':
@@ -140,9 +153,9 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
     }
   }
 
-  const ask = async () => {
+  const ask = async (how: () => Promise<unknown>) => {
     try {
-      await askNow()
+      await how()
     } catch (cause) {
       setError(String(cause))
     }
@@ -211,8 +224,15 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
           <section className="panel">
             <div className="panel-head">
               <h2>Questions &amp; suggested answers</h2>
-              <button onClick={() => void ask()} disabled={!running}>
+              <button onClick={() => void ask(askNow)} disabled={!running}>
                 Ask now
+              </button>
+              <button
+                onClick={() => void ask(captureAndAsk)}
+                disabled={!running}
+                title="Takes a screenshot of the selected region (or the whole screen) and asks about it"
+              >
+                Capture &amp; ask
               </button>
             </div>
             <ul className="cards">
@@ -247,6 +267,15 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
                           <span className="badge warn">📷 screenshot failed</span>
                         )}
                       </div>
+                      {card.image && (
+                        <button
+                          type="button"
+                          className="card-shot"
+                          onClick={() => setZoom(card.image ?? null)}
+                        >
+                          <img src={card.image} alt="Screenshot sent with the question" />
+                        </button>
+                      )}
                     </>
                   ) : card.error ? (
                     <p className="error">Analysis failed: {card.error}</p>
@@ -299,6 +328,13 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
           )}
         </div>
       </footer>
+
+      {zoom && (
+        <div className="overlay" role="dialog" aria-label="Screenshot" onClick={() => setZoom(null)}>
+          <img src={zoom} alt="Screenshot sent with the question" />
+          <button onClick={() => setZoom(null)}>Close</button>
+        </div>
+      )}
     </div>
   )
 }

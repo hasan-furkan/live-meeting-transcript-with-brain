@@ -383,6 +383,55 @@ fn name_in_fast_pass_emits_hit_then_analysis() {
 }
 
 #[test]
+fn capture_and_ask_screenshots_even_when_mode_off() {
+    let rt = Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start(vec![(200, text_reply(ASSIST_JSON))]));
+    let llm = Arc::new(LlmClient::new(&server.url, "test-key".into(), "test-model"));
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path());
+    assert_eq!(cfg.screenshot.0, ScreenshotMode::Off);
+    let input = Input::default();
+    let (session, events) = start_fake(&rt, cfg, FakeTranscriber::new("", &[]), Some(llm), &input);
+
+    session.capture_and_ask();
+
+    let seen = wait_for(&events, WAIT, |e| {
+        e.iter().any(|x| matches!(x, SessionEvent::Analysis { .. }))
+    });
+    let started = seen
+        .iter()
+        .find_map(|e| match e {
+            SessionEvent::AnalysisStarted { id, reason } if reason == "capture" => Some(*id),
+            _ => None,
+        })
+        .expect("capture analysis started");
+    let (id, status, image) = seen
+        .iter()
+        .find_map(|e| match e {
+            SessionEvent::Analysis {
+                id,
+                screenshot,
+                image,
+                ..
+            } => Some((*id, *screenshot, image.clone())),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(id, started);
+    assert_ne!(
+        status,
+        ScreenshotStatus::Off,
+        "capture must attempt a screenshot even when the mode is off: {seen:?}"
+    );
+    assert_eq!(status == ScreenshotStatus::Attached, image.is_some());
+    if let Some(url) = image {
+        assert!(url.starts_with("data:image/jpeg;base64,"), "{url}");
+    }
+
+    session.stop().unwrap();
+}
+
+#[test]
 fn updated_names_apply_to_running_session() {
     let rt = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();

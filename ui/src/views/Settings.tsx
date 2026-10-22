@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
   downloadModel,
@@ -50,6 +50,9 @@ function Section({
 
 function Settings({ session }: { session?: SessionStatus }) {
   const [settings, setSettings] = useState<SettingsData | null>(null)
+  const [saved, setSaved] = useState<SettingsData | null>(null)
+  const [justSaved, setJustSaved] = useState(false)
+  const savedTimer = useRef<number | undefined>(undefined)
   const [key, setKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
   const [monitors, setMonitors] = useState<string[]>([])
@@ -61,13 +64,20 @@ function Settings({ session }: { session?: SessionStatus }) {
 
   const refreshRegion = useCallback(() => {
     void getSettings().then(
-      (fresh) => setSettings((current) => (current ? { ...current, region: fresh.region } : current)),
+      (fresh) => {
+        setSettings((current) => (current ? { ...current, region: fresh.region } : current))
+        setSaved((current) => (current ? { ...current, region: fresh.region } : current))
+      },
       () => {},
     )
   }, [])
 
   useEffect(() => {
-    void getSettings().then(setSettings, (cause: unknown) => setError(String(cause)))
+    const loaded = (fresh: SettingsData) => {
+      setSettings(fresh)
+      setSaved(fresh)
+    }
+    void getSettings().then(loaded, (cause: unknown) => setError(String(cause)))
     // The region picker window closes after saving; re-read only the region so unsaved edits survive.
     window.addEventListener('focus', refreshRegion)
     void hasApiKey().then(setKeySaved, () => {})
@@ -84,6 +94,7 @@ function Settings({ session }: { session?: SessionStatus }) {
       active = false
       unlisten?.()
       window.removeEventListener('focus', refreshRegion)
+      window.clearTimeout(savedTimer.current)
     }
   }, [refreshRegion])
 
@@ -101,10 +112,13 @@ function Settings({ session }: { session?: SessionStatus }) {
   const patch = (change: Partial<SettingsData>) =>
     setSettings((current) => (current ? { ...current, ...change } : current))
 
+  const dirty = saved !== null && JSON.stringify(settings) !== JSON.stringify(saved)
+
   const save = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
     setStatus('')
+    setJustSaved(false)
     const cleaned: SettingsData = {
       ...settings,
       name_variants: cleanLines(settings.name_variants),
@@ -113,12 +127,15 @@ function Settings({ session }: { session?: SessionStatus }) {
     try {
       await saveSettings(cleaned)
       setSettings(cleaned)
+      setSaved(cleaned)
       if (key.trim() !== '') {
         await setApiKey(key)
         setKey('')
         setKeySaved(true)
       }
-      setStatus('Saved')
+      window.clearTimeout(savedTimer.current)
+      setJustSaved(true)
+      savedTimer.current = window.setTimeout(() => setJustSaved(false), 3000)
     } catch (cause) {
       setError(String(cause))
     }
@@ -393,10 +410,14 @@ function Settings({ session }: { session?: SessionStatus }) {
 
           <div className="savebar">
             <span className="savebar-msg">
+              {dirty && <span className="warn">Unsaved changes — press Save (or Enter)</span>}
+              {justSaved && <span className="muted">Saved ✓</span>}
               {status && <span className="muted">{status}</span>}
               {error && <span className="error">{error}</span>}
             </span>
-            <button type="submit" className="primary">Save</button>
+            <button type="submit" className={dirty ? 'primary' : undefined}>
+              Save
+            </button>
           </div>
         </form>
       </main>

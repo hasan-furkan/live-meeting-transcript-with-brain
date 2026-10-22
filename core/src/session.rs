@@ -74,6 +74,8 @@ pub enum SessionEvent {
         time: String,
         analysis: Analysis,
         screenshot: ScreenshotStatus,
+        /// The exact image sent to the LLM, as a data URL.
+        image: Option<String>,
     },
     AnalysisFailed {
         #[ts(type = "number")]
@@ -156,6 +158,7 @@ impl std::error::Error for SessionError {}
 
 enum Command {
     AskNow,
+    CaptureAndAsk,
     Triggers(LiveTriggers),
     Finish,
 }
@@ -268,6 +271,11 @@ impl Session {
     /// Non-blocking: the request is queued for the STT thread, which snapshots the context.
     pub fn ask_now(&self) {
         let _ = self.commands.send(Command::AskNow);
+    }
+
+    /// Like `ask_now`, but screenshots even when the configured mode is Off.
+    pub fn capture_and_ask(&self) {
+        let _ = self.commands.send(Command::CaptureAndAsk);
     }
 
     /// Non-blocking: the STT thread rebuilds the matcher and prompt between segments.
@@ -428,6 +436,7 @@ impl Worker {
             if audio_done {
                 match self.commands.recv_timeout(TICK) {
                     Ok(Command::AskNow) => self.analyze("manual"),
+                    Ok(Command::CaptureAndAsk) => self.capture_and_ask(),
                     Ok(Command::Triggers(t)) => self.apply_triggers(t),
                     Ok(Command::Finish) => break,
                     Err(RecvTimeoutError::Timeout) => {}
@@ -457,6 +466,7 @@ impl Worker {
         loop {
             match self.commands.try_recv() {
                 Ok(Command::AskNow) => self.analyze("manual"),
+                Ok(Command::CaptureAndAsk) => self.capture_and_ask(),
                 Ok(Command::Triggers(t)) => self.apply_triggers(t),
                 Ok(Command::Finish) => return true,
                 Err(TryRecvError::Empty) => return false,
@@ -605,6 +615,25 @@ impl Worker {
     }
 
     fn analyze(&mut self, reason: &str) {
+        self.analyze_with(reason, self.screenshot.clone());
+    }
+
+    /// A screenshot is always taken: the saved region if one exists, else the whole monitor.
+    fn capture_and_ask(&mut self) {
+        let (_, monitor, region) = self.screenshot.clone();
+        let mode = if region.is_some() {
+            ScreenshotMode::Region
+        } else {
+            ScreenshotMode::Full
+        };
+        self.analyze_with("capture", (mode, monitor, region));
+    }
+
+    fn analyze_with(
+        &mut self,
+        reason: &str,
+        screenshot: (ScreenshotMode, Option<String>, Option<Region>),
+    ) {
         let id = self.ids.fetch_add(1, Ordering::Relaxed);
         (self.sink)(SessionEvent::AnalysisStarted {
             id,
@@ -619,7 +648,6 @@ impl Worker {
         };
         let recent = last_words(&self.recent_text(), RECENT_WORDS);
         let course = self.course.clone();
-        let screenshot = self.screenshot.clone();
         let explanation_language = self.explanation_language.clone();
         let sink = Arc::clone(&self.sink);
         self.rt.spawn(async move {
@@ -740,6 +768,9 @@ async fn run_analysis(
             time: clock(),
             analysis: parse_analysis(&reply),
             screenshot,
+            image: image
+                .as_ref()
+                .map(|image| format!("data:{};base64,{}", image.media_type, image.base64)),
         },
         Err(error) => SessionEvent::AnalysisFailed {
             id,
