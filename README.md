@@ -18,7 +18,16 @@ A desktop companion for online lectures. It listens to your computer's system au
 - **The API key is stored in the OS keychain** (Windows Credential Manager / macOS Keychain), never in settings JSON or logs. Settings live in the OS app-config directory; Whisper models live in the OS app-data directory.
 - **This repository contains no lecture data**, settings, transcripts, keys or model files. `.gitignore` keeps them out.
 
-## Requirements
+## Download
+
+Ready-made installers are on the [Releases](../../releases) page:
+
+- **Windows** (`…_x64-setup.exe` or `.msi`): needs an **NVIDIA RTX GPU** with **CUDA 12** installed. For other GPUs or CPU-only, build it yourself (below).
+- **macOS** (`.dmg`): Apple Silicon. The app is not signed: right-click → **Open** the first time.
+
+On first run open **Settings**, enter your API key, download the Whisper model and choose the notes folder. Windows may show a SmartScreen warning for the unsigned installer (**More info → Run anyway**).
+
+## Requirements (building from source)
 
 - **Windows 11**: NVIDIA GPU + CUDA Toolkit 12.x recommended (the release build enables CUDA); works on CPU without them.
 - **macOS 13+** on Apple Silicon (Metal). Grant **Screen Recording** permission in System Settings → Privacy & Security for system audio capture and screenshots; without it the app reports a permission error.

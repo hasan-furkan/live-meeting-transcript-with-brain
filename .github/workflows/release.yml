@@ -1,0 +1,32 @@
+name: Release
+
+# Push a tag like v0.1.0: builds the macOS app and creates a draft GitHub Release.
+# The Windows installer (CUDA) is built locally and attached to the same draft.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix ui ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: npx --yes @tauri-apps/cli@2
+          args: --features metal
+          tagName: ${{ github.ref_name }}
+          releaseName: Live Meeting Assistant ${{ github.ref_name }}
+          releaseBody: See the README for requirements. Windows needs an NVIDIA RTX GPU with CUDA 12; macOS needs Apple Silicon.
+          releaseDraft: true
