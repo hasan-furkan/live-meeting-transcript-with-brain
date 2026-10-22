@@ -9,6 +9,7 @@ if ($IsWindows -or $env:OS -eq 'Windows_NT') {
     if (-not $env:LIBCLANG_PATH) {
         $clang = Get-ChildItem "$env:APPDATA\Python\Python3*\site-packages\clang\native\libclang.dll", 'C:\Program Files\LLVM\bin\libclang.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($clang) { $env:LIBCLANG_PATH = $clang.DirectoryName }
+        else { Write-Warning 'libclang not found: run `py -m pip install --user libclang` (or install LLVM), or set LIBCLANG_PATH.' }
     }
     if (-not $env:CMAKE_GENERATOR -and -not (Get-Command ninja -ErrorAction SilentlyContinue)) { $env:CMAKE_GENERATOR = 'Visual Studio 17 2022' }
 }
