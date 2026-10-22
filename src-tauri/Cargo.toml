@@ -5,6 +5,7 @@ description = "Live Meeting Assistant"
 edition.workspace = true
 license.workspace = true
 rust-version = "1.90"
+publish = false
 
 [lib]
 name = "lma_app_lib"
@@ -14,9 +15,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 workspace = true
 
 [build-dependencies]
-tauri-build = { version = "2" }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+lma_core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2" }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
+ts-rs = "10"
+
+[features]
+cuda = ["lma_core/cuda"]
+metal = ["lma_core/metal"]

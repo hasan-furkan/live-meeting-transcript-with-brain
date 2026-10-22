@@ -10,8 +10,10 @@
     "beforeBuildCommand": "npm --prefix ../ui run build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
         "title": "Live Meeting Assistant",
         "width": 800,
         "height": 600,
