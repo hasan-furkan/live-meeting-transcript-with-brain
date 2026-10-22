@@ -557,6 +557,18 @@ button.primary:hover:not(:disabled) {
   border-color: #34d399;
 }
 
+button.danger {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+  font-weight: 600;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #f87171;
+  border-color: #f87171;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

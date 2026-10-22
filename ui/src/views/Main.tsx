@@ -203,7 +203,7 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
             <div className="panel-head">
               <h2>Live transcript</h2>
               {running ? (
-                <button onClick={() => void stop()}>Stop</button>
+                <button className="danger" onClick={() => void stop()}>Stop</button>
               ) : (
                 <button className="primary" onClick={() => setPicking(true)}>
                   Start
