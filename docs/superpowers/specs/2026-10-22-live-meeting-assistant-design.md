@@ -61,7 +61,7 @@ Rust modules, each with one job and testable alone:
 | `stt` | Owns the whisper context. Fast pass: every ~2 s transcribe the last ~8 s (partial text, not persisted). Final pass: on VAD silence (or 15 s max) transcribe the segment and emit a final line. Name variants are passed as the initial prompt to bias recognition. Reports GPU/CPU mode. |
 | `transcript` | Holds final lines in memory and appends each to the transcript file immediately. Provides "last N words". |
 | `triggers` | Pure functions + small state: normalisation, name/keyword matching, cooldown, question heuristic. |
-| `llm` | Anthropic-Messages-compatible client. Base URL, key, model from settings. Text + image content. One retry on network/5xx. |
+| `llm` | Anthropic-Messages-compatible client. Base URL, key, model from settings. Text + image content. One retry on network/5xx. Every request carries `x-opencode-session: <random id>` (one id per client instance; OpenCode Go rejects requests without it, other providers ignore it). Response may contain `thinking` blocks; only `text` blocks are used. Image input verified working on OpenCode Go / deepseek-v4.1-flash (2026-10-22). |
 | `assist` | Builds the analysis request, parses the JSON answer, emits results to the UI. |
 | `screenshot` | Off / Region / Full capture of the chosen monitor, in memory, PNG/JPEG encoded. |
 | `vault` | Path sanitisation, file naming, frontmatter, atomic writes. |
