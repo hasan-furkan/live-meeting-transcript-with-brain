@@ -9,6 +9,7 @@ vi.mock('../api', () => ({
   stopSession: vi.fn(async () => {}),
   askNow: vi.fn(async () => {}),
   retrySummary: vi.fn(async () => {}),
+  openScreenRecordingSettings: vi.fn(async () => {}),
 }))
 
 import * as api from '../api'
@@ -82,4 +83,44 @@ test('no_audio_banner_clears_on_level', () => {
   expect(screen.getByText('No audio detected — check the output device')).toBeInTheDocument()
   send({ type: 'Level', rms: 0.05 })
   expect(screen.queryByText('No audio detected — check the output device')).toBeNull()
+})
+
+test('permission_denied_explains_and_opens_system_settings', async () => {
+  vi.mocked(api.listCourses).mockResolvedValue(['Algorithms 101'])
+  vi.mocked(api.startSession).mockRejectedValueOnce('Screen Recording permission required')
+  render(<Main />)
+  fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Algorithms 101' }))
+  expect(
+    await screen.findByText(
+      'macOS needs Screen Recording permission to capture system audio. Grant it, then restart the app.',
+    ),
+  ).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Open System Settings' }))
+  await waitFor(() => expect(api.openScreenRecordingSettings).toHaveBeenCalled())
+})
+
+test('model_load_error_links_to_settings', async () => {
+  vi.mocked(api.listCourses).mockResolvedValue(['Algorithms 101'])
+  vi.mocked(api.startSession).mockRejectedValueOnce(
+    'Whisper model failed to load — download it again in Settings',
+  )
+  render(<Main />)
+  fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Algorithms 101' }))
+  expect(await screen.findByRole('link', { name: 'Open Settings' })).toHaveAttribute(
+    'href',
+    '#/settings',
+  )
+})
+
+test('retry_button_disappears_when_a_new_session_starts', async () => {
+  vi.mocked(api.listCourses).mockResolvedValue(['Algorithms 101'])
+  render(<Main />)
+  send({ type: 'SummaryFailed', error: 'network error' })
+  expect(screen.getByRole('button', { name: 'Retry summary' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Algorithms 101' }))
+  await screen.findByRole('button', { name: 'Stop' })
+  expect(screen.queryByRole('button', { name: 'Retry summary' })).toBeNull()
 })

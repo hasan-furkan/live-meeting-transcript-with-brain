@@ -1,8 +1,17 @@
 import { useEffect, useState } from 'react'
-import { askNow, onSessionEvent, retrySummary, startSession, stopSession } from '../api'
+import {
+  askNow,
+  onSessionEvent,
+  openScreenRecordingSettings,
+  retrySummary,
+  startSession,
+  stopSession,
+} from '../api'
 import type { Analysis } from '../bindings/Analysis'
 import type { Backend } from '../bindings/Backend'
 import CoursePicker from '../components/CoursePicker'
+
+const SCREEN_RECORDING_ERROR = 'Screen Recording permission required'
 
 type Line = { time: string; text: string }
 type Card = { id: number; time: string; analysis?: Analysis; error?: string; reason?: string }
@@ -81,6 +90,7 @@ function Main() {
 
   const start = async (name: string) => {
     setStartError(null)
+    setSummary(null)
     try {
       await startSession(name)
       setCourse(name)
@@ -143,6 +153,16 @@ function Main() {
           onSubmit={(name) => void start(name)}
           onCancel={() => setPicking(false)}
         />
+      )}
+
+      {startError === SCREEN_RECORDING_ERROR && (
+        <section className="error" aria-label="Screen Recording permission">
+          <p>
+            macOS needs Screen Recording permission to capture system audio. Grant it, then
+            restart the app.
+          </p>
+          <button onClick={() => void openScreenRecordingSettings()}>Open System Settings</button>
+        </section>
       )}
 
       <section>

@@ -18,7 +18,9 @@ async fn whisper_tiny_transcribes_fixture() {
     let path = dir.join(model_file_name("tiny"));
     if !path.is_file() {
         println!("downloading ggml-tiny.bin to {}", dir.display());
-        download_model("tiny", &dir, |_, _| {}).await.unwrap();
+        download_model("tiny", &dir, false, |_, _| {})
+            .await
+            .unwrap();
     }
 
     let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/jordan.wav");

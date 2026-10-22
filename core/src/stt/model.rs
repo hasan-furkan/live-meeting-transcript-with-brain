@@ -48,9 +48,12 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Downloads `ggml-<model>.bin` unless `force`; a forced download replaces the
+/// old file only after the new `.part` verifies.
 pub async fn download_model(
     model: &str,
     dir: &Path,
+    force: bool,
     progress: impl Fn(u64, u64),
 ) -> Result<PathBuf, SttError> {
     if !valid_model_name(model) {
@@ -58,7 +61,7 @@ pub async fn download_model(
     }
     let name = model_file_name(model);
     let dest = dir.join(&name);
-    if dest.is_file() {
+    if dest.is_file() && !force {
         return Ok(dest);
     }
     std::fs::create_dir_all(dir).map_err(|_| SttError::DownloadFailed)?;
@@ -164,11 +167,22 @@ mod tests {
     #[tokio::test]
     async fn download_rejects_invalid_name_before_network() {
         let dir = tempfile::tempdir().unwrap();
-        let err = download_model("../evil", dir.path(), |_, _| {})
+        let err = download_model("../evil", dir.path(), false, |_, _| {})
             .await
             .unwrap_err();
         assert_eq!(err, SttError::InvalidModelName);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn existing_model_is_kept_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("ggml-tiny.bin");
+        std::fs::write(&dest, b"model").unwrap();
+        let kept = download_model("tiny", dir.path(), false, |_, _| {})
+            .await
+            .unwrap();
+        assert_eq!(kept, dest);
     }
 
     #[test]

@@ -906,7 +906,7 @@ fn end_to_end_tiny_model() {
     let model_path = model.join(model_file_name("tiny"));
     if !model_path.is_file() {
         println!("downloading ggml-tiny.bin to {}", model.display());
-        rt.block_on(download_model("tiny", &model, |_, _| {}))
+        rt.block_on(download_model("tiny", &model, false, |_, _| {}))
             .unwrap();
     }
 

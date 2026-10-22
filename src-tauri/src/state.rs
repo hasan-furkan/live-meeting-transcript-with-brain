@@ -15,6 +15,7 @@ pub const NOTES_MISSING: &str = "Set the notes folder in Settings first";
 pub const MODEL_MISSING: &str = "Download the Whisper model first";
 pub const NO_SESSION: &str = "No session is running";
 pub const SESSION_RUNNING: &str = "A session is already running";
+pub const STOP_FIRST: &str = "Stop the running session first";
 
 pub struct AppState {
     pub settings: Mutex<Settings>,
@@ -115,6 +116,14 @@ impl SessionGate {
         match self.phase {
             Phase::Running => Ok(()),
             Phase::Idle => Err(NO_SESSION.to_string()),
+        }
+    }
+
+    /// For actions that would race a live session, such as a summary retry.
+    pub fn require_idle(&self) -> Result<(), String> {
+        match self.phase {
+            Phase::Idle => Ok(()),
+            Phase::Running => Err(STOP_FIRST.to_string()),
         }
     }
 }
@@ -257,6 +266,14 @@ mod tests {
     fn ask_now_without_session_errors() {
         let gate = SessionGate::new();
         assert_eq!(gate.require_running(), Err(NO_SESSION.to_string()));
+    }
+
+    #[test]
+    fn retry_summary_is_rejected_while_a_session_runs() {
+        let mut gate = SessionGate::new();
+        assert_eq!(gate.require_idle(), Ok(()));
+        assert_eq!(gate.try_begin(), Ok(()));
+        assert_eq!(gate.require_idle(), Err(STOP_FIRST.to_string()));
     }
 
     #[test]

@@ -16,9 +16,17 @@ function App() {
     return () => window.removeEventListener('hashchange', onChange)
   }, [])
 
-  if (route === '#/settings') return <Settings />
+  // The region picker lives in its own window; Main stays mounted elsewhere so a
+  // trip to Settings does not drop live session state.
   if (route === '#/region') return <RegionPicker />
-  return <Main />
+  return (
+    <>
+      <div hidden={route !== '#/'}>
+        <Main />
+      </div>
+      {route === '#/settings' && <Settings />}
+    </>
+  )
 }
 
 export default App

@@ -93,6 +93,7 @@ pub fn run() {
             commands::retry_summary,
             commands::model_status,
             commands::download_model,
+            commands::open_screen_recording_settings,
             commands::list_monitors,
             commands::list_output_devices,
             commands::open_region_picker,

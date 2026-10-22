@@ -6,15 +6,15 @@ use crate::state::{
     notification_is_silent,
 };
 use chrono::Local;
-use lma_core::capture::{list_output_devices as core_output_devices, system_source};
+use lma_core::capture::{CaptureError, list_output_devices as core_output_devices, system_source};
 use lma_core::llm::{LlmClient, validate_api_base_url};
-use lma_core::session::{Session, SessionConfig, SessionEvent, Sink};
+use lma_core::session::{Session, SessionConfig, SessionError, SessionEvent, Sink};
 use lma_core::settings::{
     Region, Settings, get_api_key, save as save_settings_file, set_api_key as store_api_key,
 };
 use lma_core::stt::{
-    EarshotVad, WhisperTranscriber, download_model as download_whisper_model, model_file_name,
-    valid_model_name,
+    EarshotVad, SttError, WhisperTranscriber, download_model as download_whisper_model,
+    model_file_name, valid_model_name,
 };
 use lma_core::vault::{allocate_session, list_courses as list_vault_courses};
 use std::sync::Arc;
@@ -28,6 +28,8 @@ const API_KEY_MISSING: &str = "API key missing";
 const INVALID_API_URL: &str = "Invalid API URL";
 const INVALID_MODEL_NAME: &str = "Invalid Whisper model name";
 const NOTES_NOT_FOUND: &str = "Notes folder not found";
+const SCREEN_RECORDING_PERMISSION: &str = "Screen Recording permission required";
+const MODEL_LOAD_FAILED: &str = "Whisper model failed to load — download it again in Settings";
 
 fn stored_api_key() -> Option<String> {
     get_api_key().ok().flatten().filter(|key| !key.is_empty())
@@ -40,6 +42,24 @@ fn llm_from(settings: &Settings) -> Option<Arc<LlmClient>> {
     }
     stored_api_key()
         .map(|key| Arc::new(LlmClient::new(&settings.api_base_url, key, &settings.model)))
+}
+
+/// A missing Screen Recording permission has its own recovery path in the UI.
+fn start_error(error: SessionError) -> String {
+    match error {
+        SessionError::Source(CaptureError::PermissionDenied) => {
+            SCREEN_RECORDING_PERMISSION.to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
+/// A corrupt model is fixed by downloading it again, so the message says so.
+fn load_error(error: SttError) -> String {
+    match error {
+        SttError::ModelLoadFailed => MODEL_LOAD_FAILED.to_string(),
+        other => other.to_string(),
+    }
 }
 
 pub fn is_running(app: &AppHandle) -> bool {
@@ -138,7 +158,7 @@ async fn start_session_inner(
         .spawn_blocking(move || WhisperTranscriber::load(&model_path, &language))
         .await
         .map_err(|_| "Could not load the Whisper model".to_string())?
-        .map_err(|error| error.to_string())?;
+        .map_err(load_error)?;
     let source =
         system_source(settings.audio_device.as_deref()).map_err(|error| error.to_string())?;
     let date = Local::now().date_naive();
@@ -184,7 +204,7 @@ async fn start_session_inner(
         state.runtime.clone(),
         sink,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(start_error)?;
 
     *lock(&state.session) = Some(session);
     *lock(&state.last) = Some((files, course, date));
@@ -225,6 +245,8 @@ pub fn ask_now(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn retry_summary(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+    // A live session's summary arrives at Stop; retrying now would write a premature one.
+    lock(&state.gate).require_idle()?;
     let Some((files, course, date)) = lock(&state.last).clone() else {
         return Err("No transcript to summarize".to_string());
     };
@@ -270,10 +292,28 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
             let _ = app.emit("model-progress", ModelProgress { done, total });
         }
     };
-    download_whisper_model(&model, &state.models_dir, progress)
+    // Always download: the file may exist but be corrupt, and Settings is the recovery path.
+    download_whisper_model(&model, &state.models_dir, true, progress)
         .await
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// The one deep link the app may open; fixed, so no webview value reaches the command.
+#[tauri::command]
+pub fn open_screen_recording_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| "Could not open System Settings".to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Not supported".to_string())
+    }
 }
 
 #[tauri::command]
@@ -366,4 +406,31 @@ pub fn quit(app: &AppHandle) {
         .await;
         app.exit(0);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_denied_gets_the_screen_recording_message() {
+        assert_eq!(
+            start_error(SessionError::Source(CaptureError::PermissionDenied)),
+            SCREEN_RECORDING_PERMISSION
+        );
+    }
+
+    #[test]
+    fn other_capture_errors_keep_their_message() {
+        assert_eq!(
+            start_error(SessionError::Source(CaptureError::NoDevice)),
+            "no audio output device"
+        );
+    }
+
+    #[test]
+    fn model_load_failure_points_at_the_settings_download() {
+        assert_eq!(load_error(SttError::ModelLoadFailed), MODEL_LOAD_FAILED);
+        assert_eq!(load_error(SttError::ModelMissing), "model file missing");
+    }
 }
