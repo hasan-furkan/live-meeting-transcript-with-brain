@@ -346,7 +346,8 @@ pub fn list_output_devices() -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn open_region_picker(app: AppHandle) -> Result<(), String> {
+// async: building a window inside a sync command deadlocks on Windows.
+pub async fn open_region_picker(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("region") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -393,7 +394,7 @@ pub struct RegionSnapshot {
 
 /// The chosen monitor's picture for the region picker, in memory only.
 #[tauri::command]
-pub fn region_snapshot(app: AppHandle) -> Result<RegionSnapshot, String> {
+pub async fn region_snapshot(app: AppHandle) -> Result<RegionSnapshot, String> {
     let monitor = lock(&app.state::<AppState>().settings).monitor.clone();
     let (image, width, height) =
         capture_monitor_full(monitor.as_deref()).map_err(|error| error.to_string())?;
