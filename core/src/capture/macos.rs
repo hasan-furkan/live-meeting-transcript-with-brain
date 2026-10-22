@@ -36,20 +36,22 @@ impl AudioSource for MacSystemAudio {
         let stop = self.stop.clone();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || run(tx, stop, ready_tx));
-        let result = match ready_rx.recv_timeout(START_TIMEOUT) {
-            Ok(result) => result,
+        match ready_rx.recv_timeout(START_TIMEOUT) {
+            Ok(Ok(())) => {
+                self.handle = Some(handle);
+                Ok(())
+            }
+            Ok(Err(error)) => {
+                let _ = handle.join();
+                Err(error)
+            }
             Err(_) => {
-                // The thread exits on its own once ScreenCaptureKit returns.
+                // Still inside ScreenCaptureKit: signal stop and detach rather
+                // than join, which would block until it returns.
                 self.stop.store(true, Ordering::Relaxed);
                 Err(CaptureError::Failed)
             }
-        };
-        if result.is_ok() {
-            self.handle = Some(handle);
-        } else {
-            let _ = handle.join();
         }
-        result
     }
 
     fn stop(&mut self) {
