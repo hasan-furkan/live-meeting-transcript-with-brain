@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  windows-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix ui ci
+        if: hashFiles('ui/package-lock.json') != ''
+      # No `cuda` feature: runners have no CUDA Toolkit.
+      - run: pwsh scripts/check.ps1
+
+  macos-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build UI
+        if: hashFiles('ui/package-lock.json') != ''
+        run: npm --prefix ui ci && npm --prefix ui run build
+      - run: cargo test --workspace
+      - run: cargo build --workspace
