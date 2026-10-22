@@ -14,8 +14,7 @@ if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
 # whisper-rs-sys runs bindgen, which needs libclang (e.g. `pip install --user libclang`).
 if ($IsWindows -or $env:OS -eq 'Windows_NT') {
     if (-not $env:LIBCLANG_PATH) {
-        $clang = Get-ChildItem "$env:APPDATA\Python\Python3*\site-packages\clang
-ative\libclang.dll", 'C:\Program Files\LLVMin\libclang.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+        $clang = Get-ChildItem "$env:APPDATA\Python\Python3*\site-packages\clang\native\libclang.dll", 'C:\Program Files\LLVM\bin\libclang.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($clang) { $env:LIBCLANG_PATH = $clang.DirectoryName }
     }
     if (-not $env:CMAKE_GENERATOR -and -not (Get-Command ninja -ErrorAction SilentlyContinue)) { $env:CMAKE_GENERATOR = 'Visual Studio 17 2022' }
