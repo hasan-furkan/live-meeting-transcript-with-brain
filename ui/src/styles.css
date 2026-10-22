@@ -33,11 +33,6 @@ body {
   font-size: 14px;
 }
 
-html.transparent,
-body.transparent {
-  background: transparent;
-}
-
 .page {
   padding: 12px;
   max-width: 640px;
@@ -226,13 +221,24 @@ meter {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  padding-top: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111111;
 }
 
-.region-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+.region-stage {
+  position: relative;
+  line-height: 0;
+}
+
+.region-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 3rem);
   cursor: crosshair;
+  user-select: none;
 }
 
 .region-box {
@@ -246,6 +252,7 @@ meter {
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 2;
   display: flex;
   gap: 8px;
   align-items: center;

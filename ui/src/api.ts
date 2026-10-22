@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ModelProgress } from './bindings/ModelProgress'
 import type { ModelStatus } from './bindings/ModelStatus'
 import type { Region } from './bindings/Region'
+import type { RegionSnapshot } from './bindings/RegionSnapshot'
 import type { SessionEvent } from './bindings/SessionEvent'
 import type { Settings } from './bindings/Settings'
 
@@ -22,6 +23,7 @@ export const openScreenRecordingSettings = () => invoke('open_screen_recording_s
 export const listMonitors = () => invoke<string[]>('list_monitors')
 export const listOutputDevices = () => invoke<string[]>('list_output_devices')
 export const openRegionPicker = () => invoke('open_region_picker')
+export const regionSnapshot = () => invoke<RegionSnapshot>('region_snapshot')
 export const saveRegion = (region: Region) => invoke('save_region', { region })
 
 export const onSessionEvent = (callback: (event: SessionEvent) => void): Promise<UnlistenFn> =>

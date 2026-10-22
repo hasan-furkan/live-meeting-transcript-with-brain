@@ -56,6 +56,25 @@ pub fn clamp_region(region: Region, monitor_width: u32, monitor_height: u32) -> 
     })
 }
 
+/// Capture the chosen monitor whole and report its physical size as well.
+pub fn capture_monitor_full(monitor: Option<&str>) -> Result<(LlmImage, u32, u32), ShotError> {
+    let monitors = xcap::Monitor::all().map_err(|_| ShotError::Failed)?;
+    let chosen = pick_monitor(&monitors, monitor).ok_or(ShotError::NoMonitor)?;
+    let width = chosen.width().map_err(|_| ShotError::Failed)?;
+    let height = chosen.height().map_err(|_| ShotError::Failed)?;
+    let image = chosen.capture_image().map_err(|_| ShotError::Failed)?;
+    Ok((encode_jpeg(image)?, width, height))
+}
+
+fn pick_monitor<'a>(
+    monitors: &'a [xcap::Monitor],
+    name: Option<&str>,
+) -> Option<&'a xcap::Monitor> {
+    name.and_then(|name| monitors.iter().find(|m| m.name().is_ok_and(|n| n == name)))
+        .or_else(|| monitors.iter().find(|m| m.is_primary().unwrap_or(false)))
+        .or_else(|| monitors.first())
+}
+
 /// Capture the configured monitor or region as a JPEG, in memory.
 pub fn capture(
     mode: ScreenshotMode,
@@ -66,11 +85,7 @@ pub fn capture(
         return Ok(None);
     }
     let monitors = xcap::Monitor::all().map_err(|_| ShotError::Failed)?;
-    let chosen = monitor
-        .and_then(|name| monitors.iter().find(|m| m.name().is_ok_and(|n| n == name)))
-        .or_else(|| monitors.iter().find(|m| m.is_primary().unwrap_or(false)))
-        .or_else(|| monitors.first())
-        .ok_or(ShotError::NoMonitor)?;
+    let chosen = pick_monitor(&monitors, monitor).ok_or(ShotError::NoMonitor)?;
     let image = match mode {
         ScreenshotMode::Region => {
             let region = region.ok_or(ShotError::NoRegion)?;

@@ -8,6 +8,7 @@ use crate::state::{
 use chrono::Local;
 use lma_core::capture::{CaptureError, list_output_devices as core_output_devices, system_source};
 use lma_core::llm::{LlmClient, validate_api_base_url};
+use lma_core::screenshot::capture_monitor_full;
 use lma_core::session::{LiveTriggers, Session, SessionConfig, SessionError, SessionEvent, Sink};
 use lma_core::settings::{
     Region, Settings, get_api_key, save as save_settings_file, set_api_key as store_api_key,
@@ -17,10 +18,12 @@ use lma_core::stt::{
     model_file_name, valid_model_name,
 };
 use lma_core::vault::{allocate_session, list_courses as list_vault_courses};
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use ts_rs::TS;
 
 const INVALID_HOTKEY: &str = "Invalid hotkey";
 const SAVE_FAILED: &str = "Could not save settings";
@@ -344,6 +347,11 @@ pub fn list_output_devices() -> Vec<String> {
 
 #[tauri::command]
 pub fn open_region_picker(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("region") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
     let state = app.state::<AppState>();
     let selected = lock(&state.settings).monitor.clone();
     let monitors = app
@@ -357,24 +365,44 @@ pub fn open_region_picker(app: AppHandle) -> Result<(), String> {
 
     let scale = monitor.scale_factor();
     let position = monitor.position();
-    let size = monitor.size();
     tauri::WebviewWindowBuilder::new(
         &app,
         "region",
         tauri::WebviewUrl::App("index.html#/region".into()),
     )
-    .transparent(true)
-    .decorations(false)
-    .always_on_top(true)
-    .resizable(false)
+    .title("Select screenshot region — drag a rectangle, Enter to save, Esc to cancel")
+    .decorations(true)
+    .resizable(true)
+    .maximized(true)
+    // Hidden until the page has the picture, or the capture would include this window.
+    .visible(false)
     .position(f64::from(position.x) / scale, f64::from(position.y) / scale)
-    .inner_size(
-        f64::from(size.width) / scale,
-        f64::from(size.height) / scale,
-    )
     .build()
     .map_err(|_| "Could not open the region picker".to_string())?;
     Ok(())
+}
+
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub struct RegionSnapshot {
+    pub image_base64: String,
+    pub media_type: String,
+    pub monitor_width: u32,
+    pub monitor_height: u32,
+}
+
+/// The chosen monitor's picture for the region picker, in memory only.
+#[tauri::command]
+pub fn region_snapshot(app: AppHandle) -> Result<RegionSnapshot, String> {
+    let monitor = lock(&app.state::<AppState>().settings).monitor.clone();
+    let (image, width, height) =
+        capture_monitor_full(monitor.as_deref()).map_err(|error| error.to_string())?;
+    Ok(RegionSnapshot {
+        image_base64: image.base64,
+        media_type: image.media_type,
+        monitor_width: width,
+        monitor_height: height,
+    })
 }
 
 #[tauri::command]

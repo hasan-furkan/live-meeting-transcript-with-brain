@@ -97,6 +97,7 @@ pub fn run() {
             commands::list_monitors,
             commands::list_output_devices,
             commands::open_region_picker,
+            commands::region_snapshot,
             commands::save_region,
         ])
         .setup(|app| {

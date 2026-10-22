@@ -12,6 +12,7 @@
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "dialog:allow-open",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    "core:window:allow-show"
   ]
 }
