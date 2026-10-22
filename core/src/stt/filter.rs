@@ -25,11 +25,35 @@ pub fn initial_prompt(names: &[String], enabled: bool) -> Option<String> {
     Some(format!("Participants: {}.", names.join(", ")))
 }
 
-/// True when `text` is empty, echoes the initial prompt (or only its words), or is a known
-/// whisper hallucination phrase.
+/// True when nothing outside bracketed annotations (`[..]`, `(..)`, `*..*`, `♪ ♫`) is
+/// alphanumeric, e.g. whisper's `[Music]` or `(applause)`.
+fn only_non_speech(text: &str) -> bool {
+    let mut close = None;
+    for c in text.trim().chars() {
+        match close {
+            Some(end) => {
+                if c == end {
+                    close = None;
+                }
+            }
+            None => match c {
+                '[' => close = Some(']'),
+                '(' => close = Some(')'),
+                '*' => close = Some('*'),
+                '♪' | '♫' => {}
+                c if c.is_alphanumeric() => return false,
+                _ => {}
+            },
+        }
+    }
+    true
+}
+
+/// True when `text` is empty, echoes the initial prompt (or only its words), is a known
+/// whisper hallucination phrase, or is only a non-speech annotation.
 pub fn is_hallucination(text: &str, prompt: Option<&str>) -> bool {
     let normalised = normalize(text);
-    if normalised.is_empty() {
+    if normalised.is_empty() || only_non_speech(text) {
         return true;
     }
     if let Some(prompt) = prompt {
@@ -84,6 +108,25 @@ mod tests {
         assert!(!is_hallucination(
             "Jordan Reyes will present",
             prompt.as_deref()
+        ));
+    }
+
+    #[test]
+    fn non_speech_annotations() {
+        for text in [
+            "[Music]",
+            "[BLANK_AUDIO]",
+            "(applause)",
+            "[ Silence ]",
+            "*music*",
+            "♪",
+            " ♪ ♫ ",
+        ] {
+            assert!(is_hallucination(text, None), "{text}");
+        }
+        assert!(!is_hallucination(
+            "Jordan [laughs] what is merge sort",
+            None
         ));
     }
 
