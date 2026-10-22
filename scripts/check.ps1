@@ -4,6 +4,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $log = Join-Path $root 'check.log'
 Remove-Item $log -ErrorAction SilentlyContinue
+function Out-Log { process { $line = "$_"; Write-Output $line; Add-Content -Path $log -Value $line -Encoding UTF8 } }
 
 # whisper-rs needs cmake; on Windows it may only exist inside Visual Studio.
 if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
@@ -29,12 +30,12 @@ if (Test-Path (Join-Path $root 'ui/package.json')) {
 }
 
 foreach ($s in $steps) {
-    "=== $($s.name)" | Tee-Object -FilePath $log -Append
-    & $s.exe @($s.args) 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $log -Append
+    "=== $($s.name)" | Out-Log
+    & $s.exe @($s.args) 2>&1 | ForEach-Object { "$_" } | Out-Log
     if ($LASTEXITCODE -ne 0) {
-        "CHECK FAILED: $($s.name)" | Tee-Object -FilePath $log -Append
+        "CHECK FAILED: $($s.name)" | Out-Log
         exit 1
     }
 }
-'CHECK PASSED' | Tee-Object -FilePath $log -Append
+'CHECK PASSED' | Out-Log
 exit 0
