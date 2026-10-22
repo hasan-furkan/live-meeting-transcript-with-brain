@@ -7,7 +7,8 @@ use lma_core::triggers::HitKind;
 use lma_core::vault::SessionFiles;
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 use ts_rs::TS;
 
 pub const NOTES_MISSING: &str = "Set the notes folder in Settings first";
@@ -22,7 +23,50 @@ pub struct AppState {
     pub gate: Mutex<SessionGate>,
     pub session: Mutex<Option<Session>>,
     pub last: Mutex<Option<(SessionFiles, String, NaiveDate)>>,
+    pub summary: Arc<SummaryTracker>,
     pub runtime: tokio::runtime::Handle,
+}
+
+/// Whether a summary requested by `Session::stop` is still in flight, so Quit can wait for it.
+pub struct SummaryTracker {
+    pending: Mutex<bool>,
+    done: Condvar,
+}
+
+impl SummaryTracker {
+    pub fn new() -> Self {
+        Self {
+            pending: Mutex::new(false),
+            done: Condvar::new(),
+        }
+    }
+
+    /// Called before `Session::stop`, so the summary's completion cannot race past the wait.
+    pub fn begin(&self) {
+        *lock(&self.pending) = true;
+    }
+
+    /// Called by the sink on `SummaryWritten` / `SummaryFailed`.
+    pub fn complete(&self) {
+        *lock(&self.pending) = false;
+        self.done.notify_all();
+    }
+
+    /// Blocks until no summary is pending or `timeout` elapses; true when none is pending.
+    pub fn wait(&self, timeout: Duration) -> bool {
+        let pending = lock(&self.pending);
+        let (pending, _) = self
+            .done
+            .wait_timeout_while(pending, timeout, |pending| *pending)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        !*pending
+    }
+}
+
+impl Default for SummaryTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Poisoned locks still hold valid data; a panicking reader must not brick the app.
@@ -152,6 +196,11 @@ pub fn notification_for(event: &SessionEvent) -> Option<(String, String)> {
     }
 }
 
+/// Question-to-the-class notices must not play a sound.
+pub fn notification_is_silent(event: &SessionEvent) -> bool {
+    matches!(event, SessionEvent::QuestionDetected { .. })
+}
+
 /// The most recent `max` chars, marked from the front when something was cut.
 fn last_chars(text: &str, max: usize) -> String {
     let count = text.chars().count();
@@ -162,12 +211,12 @@ fn last_chars(text: &str, max: usize) -> String {
     format!("…{tail}")
 }
 
-/// The first `max` chars, marked at the end when something was cut.
+/// The first `max` chars, including the marker when something was cut.
 fn first_chars(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
     }
-    let head: String = text.chars().take(max).collect();
+    let head: String = text.chars().take(max.saturating_sub(1)).collect();
     format!("{head}…")
 }
 
@@ -304,8 +353,9 @@ mod tests {
             },
         };
         let (_, body) = notification_for(&event).unwrap();
-        assert_eq!(body.chars().count(), 201);
+        assert_eq!(body.chars().count(), 200);
         assert!(body.ends_with('…'));
+        assert!(body.starts_with(&format!("{} → ", "q".repeat(150))));
     }
 
     #[test]
@@ -315,9 +365,43 @@ mod tests {
         };
         let (title, body) = notification_for(&event).unwrap();
         assert_eq!(title, "Question to the class");
-        assert_eq!(body.chars().count(), 121);
+        assert_eq!(body.chars().count(), 120);
         assert!(body.ends_with('…'));
-        assert!(body.starts_with(&"ş".repeat(120)));
+        assert!(body.starts_with(&"ş".repeat(119)));
+    }
+
+    #[test]
+    fn question_detected_notification_is_silent() {
+        assert!(notification_is_silent(&SessionEvent::QuestionDetected {
+            text: "anyone?".to_string()
+        }));
+        assert!(!notification_is_silent(&SessionEvent::NoAudio));
+        assert!(!notification_is_silent(&hit(
+            HitKind::Name,
+            "Jordan",
+            "Jordan"
+        )));
+    }
+
+    #[test]
+    fn summary_tracker_is_pending_between_begin_and_complete() {
+        let tracker = SummaryTracker::new();
+        assert!(tracker.wait(Duration::from_millis(1)));
+
+        tracker.begin();
+        assert!(!tracker.wait(Duration::from_millis(10)));
+
+        tracker.complete();
+        assert!(tracker.wait(Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn summary_tracker_wait_wakes_on_complete() {
+        let tracker = Arc::new(SummaryTracker::new());
+        tracker.begin();
+        let completer = Arc::clone(&tracker);
+        std::thread::spawn(move || completer.complete());
+        assert!(tracker.wait(Duration::from_secs(5)));
     }
 
     #[test]

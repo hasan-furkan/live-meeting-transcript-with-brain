@@ -4,8 +4,8 @@ mod commands;
 mod notify;
 mod state;
 
-use state::{AppState, SessionGate};
-use std::sync::Mutex;
+use state::{AppState, SessionGate, SummaryTracker};
+use std::sync::{Arc, Mutex};
 use tauri::menu::MenuBuilder;
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
@@ -42,10 +42,12 @@ fn setup_state(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         gate: Mutex::new(SessionGate::new()),
         session: Mutex::new(None),
         last: Mutex::new(None),
+        summary: Arc::new(SummaryTracker::new()),
         runtime: tauri::async_runtime::handle().inner().clone(),
     });
 
     let _ = commands::register_hotkey(app.handle(), &settings.hotkey);
+    notify::request_permission(app.handle());
     Ok(())
 }
 

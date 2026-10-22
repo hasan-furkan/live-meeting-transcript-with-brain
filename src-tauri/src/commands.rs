@@ -3,6 +3,7 @@
 use crate::notify;
 use crate::state::{
     AppState, ModelProgress, ModelStatus, NO_SESSION, check_start, lock, notification_for,
+    notification_is_silent,
 };
 use chrono::Local;
 use lma_core::capture::{list_output_devices as core_output_devices, system_source};
@@ -47,15 +48,19 @@ pub fn get_settings(app: AppHandle) -> Settings {
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let old = lock(&state.settings).hotkey.clone();
-    if settings.hotkey != old {
-        unregister_hotkey(&app, &old);
+    let old = lock(&state.settings).clone();
+    // Persist first: a hotkey switch that fails must leave file, state and live shortcut unchanged.
+    save_settings_file(&state.settings_path, &settings).map_err(|_| SAVE_FAILED.to_string())?;
+    if settings.hotkey != old.hotkey {
+        unregister_hotkey(&app, &old.hotkey);
         if register_hotkey(&app, &settings.hotkey).is_err() {
-            let _ = register_hotkey(&app, &old);
+            let _ = save_settings_file(&state.settings_path, &old);
+            if register_hotkey(&app, &old.hotkey).is_err() {
+                eprintln!("could not restore the previous hotkey");
+            }
             return Err(INVALID_HOTKEY.to_string());
         }
     }
-    save_settings_file(&state.settings_path, &settings).map_err(|_| SAVE_FAILED.to_string())?;
     *lock(&state.settings) = settings;
     Ok(())
 }
@@ -132,10 +137,17 @@ async fn start_session_inner(
     };
 
     let sink_app = app.clone();
+    let summary = Arc::clone(&state.summary);
     let sink: Sink = Arc::new(move |event: SessionEvent| {
         let _ = sink_app.emit("session-event", &event);
         if let Some((title, body)) = notification_for(&event) {
-            notify::show(&sink_app, &title, &body);
+            notify::show(&sink_app, &title, &body, notification_is_silent(&event));
+        }
+        if matches!(
+            event,
+            SessionEvent::SummaryWritten { .. } | SessionEvent::SummaryFailed { .. }
+        ) {
+            summary.complete();
         }
     });
 
@@ -161,13 +173,17 @@ pub async fn stop_session(app: AppHandle) -> Result<(), String> {
     let Some(session) = lock(&state.session).take() else {
         return Err(NO_SESSION.to_string());
     };
-    lock(&state.gate).end()?;
-    state
-        .runtime
-        .spawn_blocking(move || session.stop())
-        .await
-        .map_err(|_| "Could not stop the session".to_string())?
-        .map_err(|error| error.to_string())
+    // The gate result is reported after stopping, never instead of stopping.
+    let gate = lock(&state.gate).end();
+    // Set before `stop`, so the summary's completion cannot race past a Quit waiting on it.
+    state.summary.begin();
+    let stopped = match state.runtime.spawn_blocking(move || session.stop()).await {
+        Ok(Ok(())) => return gate,
+        Ok(Err(error)) => error.to_string(),
+        Err(_) => "Could not stop the session".to_string(),
+    };
+    state.summary.complete(); // no summary will arrive
+    Err(stopped)
 }
 
 #[tauri::command]
@@ -309,13 +325,18 @@ fn unregister_hotkey(app: &AppHandle, hotkey: &str) {
     }
 }
 
-/// Stops a running session before leaving, then exits.
+/// Stops a running session, waits (off the UI thread) up to 120 s for its summary, then exits.
 pub fn quit(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         if is_running(&app) {
             let _ = stop_session(app.clone()).await;
         }
+        let summary = Arc::clone(&app.state::<AppState>().summary);
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            summary.wait(Duration::from_secs(120));
+        })
+        .await;
         app.exit(0);
     });
 }
