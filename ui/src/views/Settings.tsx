@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
   downloadModel,
@@ -34,8 +34,17 @@ function Settings() {
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
 
+  const refreshRegion = useCallback(() => {
+    void getSettings().then(
+      (fresh) => setSettings((current) => (current ? { ...current, region: fresh.region } : current)),
+      () => {},
+    )
+  }, [])
+
   useEffect(() => {
     void getSettings().then(setSettings, (cause: unknown) => setError(String(cause)))
+    // The region picker window closes after saving; re-read only the region so unsaved edits survive.
+    window.addEventListener('focus', refreshRegion)
     void hasApiKey().then(setKeySaved, () => {})
     void listMonitors().then(setMonitors, () => {})
     void listOutputDevices().then(setDevices, () => {})
@@ -49,10 +58,17 @@ function Settings() {
     return () => {
       active = false
       unlisten?.()
+      window.removeEventListener('focus', refreshRegion)
     }
-  }, [])
+  }, [refreshRegion])
 
-  if (!settings) return <main className="page">Loading…</main>
+  if (!settings) {
+    return (
+      <main className="page">
+        Loading…{error && <span className="error">{error}</span>}
+      </main>
+    )
+  }
 
   const patch = (change: Partial<SettingsData>) =>
     setSettings((current) => (current ? { ...current, ...change } : current))

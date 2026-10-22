@@ -17,6 +17,7 @@ function rectOf(a: Point, b: Point): Rect {
 function RegionPicker() {
   const [start, setStart] = useState<Point | null>(null)
   const [current, setCurrent] = useState<Point | null>(null)
+  const [error, setError] = useState('')
   const rect = start && current ? rectOf(start, current) : null
 
   useEffect(() => {
@@ -31,6 +32,7 @@ function RegionPicker() {
   const save = useCallback(async () => {
     if (!rect || rect.width < 1 || rect.height < 1) return
     const scale = window.devicePixelRatio
+    setError('')
     try {
       await saveRegion({
         x: Math.round(rect.x * scale),
@@ -38,15 +40,17 @@ function RegionPicker() {
         width: Math.round(rect.width * scale),
         height: Math.round(rect.height * scale),
       })
-    } catch {
-      // The window stays open; the reason is shown in the main window.
+    } catch (cause) {
+      setError(String(cause))
     }
   }, [rect])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') void getCurrentWindow().close()
-      if (event.key === 'Enter') void save()
+      if (event.key === 'Enter' && !(document.activeElement instanceof HTMLButtonElement)) {
+        void save()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -89,7 +93,8 @@ function RegionPicker() {
             {Math.round(rect.width)} × {Math.round(rect.height)}
           </span>
         )}
-        <button onClick={() => void save()} disabled={!rect}>
+        {error && <span className="error">{error}</span>}
+        <button onClick={() => void save()} disabled={!rect || rect.width < 1 || rect.height < 1}>
           Save
         </button>
         <button onClick={() => void getCurrentWindow().close()}>Cancel</button>
