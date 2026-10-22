@@ -124,7 +124,7 @@ impl std::fmt::Display for KeyError {
 impl std::error::Error for KeyError {}
 
 const KEYRING_SERVICE: &str = "live-meeting-assistant";
-const KEYRING_ACCOUNT: &str = "api-key";
+const KEYRING_ACCOUNT: &str = "llm-api-key";
 
 fn entry() -> Result<keyring::Entry, KeyError> {
     keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|_| KeyError::Unavailable)
@@ -241,6 +241,12 @@ mod tests {
         s.language = "tr".into();
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
+    }
+
+    #[test]
+    fn keychain_identifiers_match_spec() {
+        assert_eq!(KEYRING_SERVICE, "live-meeting-assistant");
+        assert_eq!(KEYRING_ACCOUNT, "llm-api-key");
     }
 
     #[test]
