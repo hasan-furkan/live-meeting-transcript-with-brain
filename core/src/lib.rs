@@ -5,6 +5,7 @@
 pub mod assist;
 pub mod llm;
 pub mod settings;
+pub mod stt;
 pub mod summarize;
 pub mod triggers;
 pub mod vault;
