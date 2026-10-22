@@ -24,14 +24,13 @@ fn main() {
     let mut sum = 0.0_f64;
     let mut count = 0_usize;
     while second < SECONDS {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(chunk) => {
                 sum += chunk
                     .iter()
                     .map(|s| f64::from(*s) * f64::from(*s))
                     .sum::<f64>();
                 count += chunk.len();
-                continue;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
