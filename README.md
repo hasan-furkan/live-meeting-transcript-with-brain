@@ -33,14 +33,16 @@ A desktop companion for online lectures. It listens to your computer's system au
 ```sh
 npm --prefix ui ci
 
-# development
-cargo tauri dev --features cuda    # Windows
-cargo tauri dev --features metal   # macOS
+# Windows: scripts/build.ps1 finds CMake (also inside Visual Studio) and libclang for you
+powershell -File scripts/build.ps1        # release bundle (.msi)
+powershell -File scripts/build.ps1 dev    # development
 
-# release bundle (.msi on Windows, .app/.dmg on macOS)
-cargo tauri build --features cuda
-cargo tauri build --features metal
+# macOS (Xcode command line tools provide clang and the toolchain)
+cargo tauri build --features metal        # .app/.dmg
+cargo tauri dev --features metal
 ```
+
+On Windows, a plain `cargo tauri build` fails with "Unable to find libclang" unless `LIBCLANG_PATH` (and CMake on `PATH`) are set; `scripts/env.ps1` sets them.
 
 Quality gate (format, clippy, tests, audit, deny, UI typecheck/lint/test/build):
 
