@@ -189,7 +189,7 @@ function Settings({ session }: { session?: SessionStatus }) {
       <main className="page settings">
         <div className="page-head">
           <h1>Settings</h1>
-          <p>Changes apply immediately, also during a running session.</p>
+          <p>Press Save (or Enter) to apply. Saved trigger changes also apply to a running session.</p>
         </div>
 
         <form className="settings-form" onSubmit={(event) => void save(event)}>
@@ -286,7 +286,7 @@ function Settings({ session }: { session?: SessionStatus }) {
                 onChange={(event) => patch({ name_variants: event.target.value.split('\n') })}
               />
             </label>
-            <small className="muted">One per line. Changes apply immediately.</small>
+            <small className="muted">One per line. After saving, also applies to a running session.</small>
             <label className="field">
               <span>Keywords</span>
               <textarea
