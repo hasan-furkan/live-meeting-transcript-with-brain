@@ -1,3 +1,2 @@
 [env]
-WHISPER_DONT_GENERATE_BINDINGS = "1"
 TS_RS_EXPORT_DIR = { value = "ui/src/bindings", relative = true }
