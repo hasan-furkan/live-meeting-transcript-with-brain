@@ -143,7 +143,7 @@ fn single_line(text: &str) -> String {
 }
 
 pub struct TranscriptWriter {
-    file: File,
+    path: PathBuf,
 }
 
 impl TranscriptWriter {
@@ -157,14 +157,19 @@ impl TranscriptWriter {
         );
         file.write_all(head.as_bytes())?;
         file.sync_data()?;
-        Ok(Self { file })
+        Ok(Self {
+            path: path.to_path_buf(),
+        })
     }
 
+    /// Reopened per line: a file that was deleted, locked or made read-only between
+    /// lines fails visibly instead of accepting writes through a stale handle.
     pub fn append(&mut self, time: NaiveTime, text: &str) -> Result<(), VaultError> {
+        let mut file = OpenOptions::new().append(true).open(&self.path)?;
         let line = format!("**[{}]** {}\n", time.format("%H:%M:%S"), single_line(text));
-        self.file.write_all(line.as_bytes())?;
-        self.file.flush()?;
-        self.file.sync_data()?;
+        file.write_all(line.as_bytes())?;
+        file.flush()?;
+        file.sync_data()?;
         Ok(())
     }
 }

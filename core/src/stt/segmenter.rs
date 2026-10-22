@@ -128,6 +128,16 @@ impl Segmenter {
         }
     }
 
+    /// Returns the still-open segment when the capture stops mid-utterance.
+    pub fn flush(&mut self) -> Option<Vec<f32>> {
+        let segment = std::mem::take(&mut self.segment);
+        let speech_frames = self.speech_frames;
+        self.active = false;
+        self.speech_frames = 0;
+        self.silence_run = 0;
+        (speech_frames >= MIN_SPEECH_FRAMES).then_some(segment)
+    }
+
     fn end_segment(&mut self, events: &mut Vec<SegEvent>) {
         let segment = std::mem::take(&mut self.segment);
         let tail = segment.len().saturating_sub(PRE_ROLL_FRAMES * FRAME);
@@ -228,5 +238,38 @@ mod tests {
         let events = run(&tone(20));
         let finals = finals(&events);
         assert_eq!(finals[0].len(), 240_000);
+    }
+
+    #[test]
+    fn flush_returns_in_progress_speech() {
+        let mut segmenter = Segmenter::new();
+        let mut vad = ThresholdVad;
+        for chunk in tone(1).chunks(CHUNK) {
+            assert!(segmenter.push(chunk, &mut vad).is_empty());
+        }
+        let segment = segmenter
+            .flush()
+            .expect("an unfinished segment with speech is returned");
+        assert!(segment.len() >= 480 * 10);
+        assert!(segment.iter().any(|s| s.abs() > 0.1));
+        assert!(segmenter.flush().is_none(), "flush is not repeatable");
+    }
+
+    #[test]
+    fn flush_drops_short_or_finished_segments() {
+        let mut vad = ThresholdVad;
+        let mut short = Segmenter::new();
+        for chunk in tone(1)[..3_200].chunks(CHUNK) {
+            short.push(chunk, &mut vad);
+        }
+        assert!(short.flush().is_none(), "under 300 ms of speech");
+
+        let mut finished = Segmenter::new();
+        let mut audio = tone(2);
+        audio.extend(zeros(1));
+        for chunk in audio.chunks(CHUNK) {
+            finished.push(chunk, &mut vad);
+        }
+        assert!(finished.flush().is_none(), "already ended");
     }
 }
