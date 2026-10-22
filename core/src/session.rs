@@ -99,6 +99,8 @@ pub struct SessionConfig {
     pub general_questions: bool,
     pub name_bias: bool,
     pub screenshot: (ScreenshotMode, Option<String>, Option<Region>),
+    /// Empty = no explanation in the analysis.
+    pub explanation_language: String,
     /// Silence needed before `NoAudio` is reported; production uses 10 s.
     pub no_audio_after: Duration,
 }
@@ -169,6 +171,7 @@ impl Session {
             general_questions,
             name_bias,
             screenshot,
+            explanation_language,
             no_audio_after,
         } = cfg;
 
@@ -199,6 +202,7 @@ impl Session {
             course: course.clone(),
             general_questions,
             screenshot,
+            explanation_language,
             no_audio_after,
             question_rate: RateLimiter::new(QUESTION_COOLDOWN),
             pending: VecDeque::new(),
@@ -371,6 +375,7 @@ struct Worker {
     course: String,
     general_questions: bool,
     screenshot: (ScreenshotMode, Option<String>, Option<Region>),
+    explanation_language: String,
     no_audio_after: Duration,
     question_rate: RateLimiter,
     /// Lines that could not be written yet, oldest first.
@@ -522,6 +527,7 @@ impl Worker {
         let analysis_recent = last_words(&recent, RECENT_WORDS);
         let course = self.course.clone();
         let screenshot = self.screenshot.clone();
+        let explanation_language = self.explanation_language.clone();
         let sink = Arc::clone(&self.sink);
         let ids = Arc::clone(&self.ids);
         let text = line.to_string();
@@ -542,7 +548,16 @@ impl Worker {
                 id,
                 reason: "question".to_string(),
             });
-            run_analysis(llm, id, course, analysis_recent, screenshot, sink).await;
+            run_analysis(
+                llm,
+                id,
+                course,
+                analysis_recent,
+                screenshot,
+                explanation_language,
+                sink,
+            )
+            .await;
         });
     }
 
@@ -562,9 +577,19 @@ impl Worker {
         let recent = last_words(&self.recent_text(), RECENT_WORDS);
         let course = self.course.clone();
         let screenshot = self.screenshot.clone();
+        let explanation_language = self.explanation_language.clone();
         let sink = Arc::clone(&self.sink);
         self.rt.spawn(async move {
-            run_analysis(llm, id, course, recent, screenshot, sink).await;
+            run_analysis(
+                llm,
+                id,
+                course,
+                recent,
+                screenshot,
+                explanation_language,
+                sink,
+            )
+            .await;
         });
     }
 
@@ -653,10 +678,11 @@ async fn run_analysis(
     course: String,
     recent: String,
     screenshot: (ScreenshotMode, Option<String>, Option<Region>),
+    explanation_language: String,
     sink: Sink,
 ) {
     let image = capture_image(screenshot).await;
-    let (system, user) = assist_prompt(&course, &recent, image.is_some());
+    let (system, user) = assist_prompt(&course, &recent, image.is_some(), &explanation_language);
     let event = match llm
         .complete(&system, &user, image.as_ref(), MAX_TOKENS_ASSIST)
         .await

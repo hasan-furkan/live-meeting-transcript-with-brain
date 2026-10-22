@@ -189,6 +189,9 @@ function Main() {
                   <p>
                     <strong>Answer:</strong> {card.analysis.suggested_answer}
                   </p>
+                  {card.analysis.explanation && (
+                    <p className="muted">{card.analysis.explanation}</p>
+                  )}
                   {card.analysis.confidence && (
                     <span className="badge">{card.analysis.confidence}</span>
                   )}

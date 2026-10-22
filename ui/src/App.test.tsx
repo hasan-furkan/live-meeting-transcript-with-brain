@@ -8,6 +8,7 @@ vi.mock('./api', () => ({
     model: 'test-model',
     whisper_model: 'small',
     language: 'en',
+    explanation_language: '',
     notes_dir: null,
     name_variants: [],
     keywords: [],

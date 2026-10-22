@@ -30,6 +30,7 @@ pub struct Settings {
     pub model: String,
     pub whisper_model: String,
     pub language: String,
+    pub explanation_language: String,
     pub notes_dir: Option<PathBuf>,
     pub name_variants: Vec<String>,
     pub keywords: Vec<String>,
@@ -49,6 +50,7 @@ impl Default for Settings {
             model: "deepseek-v4.1-flash".into(),
             whisper_model: "large-v3-turbo-q5_0".into(),
             language: "en".into(),
+            explanation_language: String::new(),
             notes_dir: None,
             name_variants: Vec::new(),
             keywords: [
@@ -163,6 +165,7 @@ mod tests {
         assert_eq!(d.model, "deepseek-v4.1-flash");
         assert_eq!(d.whisper_model, "large-v3-turbo-q5_0");
         assert_eq!(d.language, "en");
+        assert_eq!(d.explanation_language, "");
         assert_eq!(d.notes_dir, None);
         assert!(d.name_variants.is_empty());
         assert_eq!(

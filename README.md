@@ -57,7 +57,7 @@ The gate must end with `CHECK PASSED`.
 1. Open **Settings** and set the API base URL, API key and model. Defaults are `https://opencode.ai/inference/go/anthropic` and `deepseek-v4.1-flash`; any Anthropic-Messages-compatible endpoint works.
 2. Download the Whisper model (default `large-v3-turbo-q5_0`) with the **Download** button. Models are fetched from the whisper.cpp repository on Hugging Face and checksum-verified.
 3. Choose your **notes folder**, e.g. `<vault>/okul`. Courses are the subfolders of this folder.
-4. Add your **name variants**, adjust the **keywords** (defaults: homework, assignment, exam, quiz, deadline, attendance) and optionally the **hotkey**.
+4. Add your **name variants**, adjust the **keywords** (defaults: homework, assignment, exam, quiz, deadline, attendance) and optionally the **hotkey**. Optionally set an **explanation language** (e.g. Turkish, Deutsch) to get a 1–2 sentence explanation under each suggested answer; leave it empty to turn it off.
 5. Choose a **screenshot mode**: Off (default), Region (pick a screen region) or Full, and the monitor to capture.
 6. Pick a course and press **Start**. The app listens while the window is hidden in the tray; closing the window does not stop a session.
 

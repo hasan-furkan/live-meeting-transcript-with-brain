@@ -28,6 +28,7 @@ const API_KEY_MISSING: &str = "API key missing";
 const INVALID_API_URL: &str = "Invalid API URL";
 const INVALID_MODEL_NAME: &str = "Invalid Whisper model name";
 const NOTES_NOT_FOUND: &str = "Notes folder not found";
+const EXPLANATION_TOO_LONG: &str = "Explanation language is too long";
 const SCREEN_RECORDING_PERMISSION: &str = "Screen Recording permission required";
 const MODEL_LOAD_FAILED: &str = "Whisper model failed to load — download it again in Settings";
 
@@ -82,6 +83,10 @@ pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), Strin
     }
     if !valid_model_name(&settings.whisper_model) {
         return Err(INVALID_MODEL_NAME.to_string());
+    }
+    settings.explanation_language = settings.explanation_language.trim().to_string();
+    if settings.explanation_language.chars().count() > 40 {
+        return Err(EXPLANATION_TOO_LONG.to_string());
     }
     if let Some(notes) = &settings.notes_dir {
         let canonical = notes
@@ -177,6 +182,7 @@ async fn start_session_inner(
             settings.monitor.clone(),
             settings.region.clone(),
         ),
+        explanation_language: settings.explanation_language.clone(),
         no_audio_after: Duration::from_secs(10),
     };
 

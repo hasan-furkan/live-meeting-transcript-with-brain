@@ -41,27 +41,80 @@ test('analysis_event_renders_card_newest_first', () => {
     type: 'Analysis',
     id: 1,
     time: '10:00',
-    analysis: { question: 'Q1', suggested_answer: 'A1', confidence: 'high', raw: null },
+    analysis: {
+      question: 'Q1',
+      suggested_answer: 'A1',
+      confidence: 'high',
+      explanation: null,
+      raw: null,
+    },
   })
   send({ type: 'AnalysisStarted', id: 2, reason: 'question' })
   send({
     type: 'Analysis',
     id: 2,
     time: '10:01',
-    analysis: { question: 'Q2', suggested_answer: 'A2', confidence: 'medium', raw: null },
+    analysis: {
+      question: 'Q2',
+      suggested_answer: 'A2',
+      confidence: 'medium',
+      explanation: null,
+      raw: null,
+    },
   })
   send({ type: 'AnalysisStarted', id: 3, reason: 'question' })
   send({
     type: 'Analysis',
     id: 3,
     time: '10:02',
-    analysis: { question: '', suggested_answer: 'A3', confidence: null, raw: 'raw text' },
+    analysis: {
+      question: '',
+      suggested_answer: 'A3',
+      confidence: null,
+      explanation: null,
+      raw: 'raw text',
+    },
   })
   const cards = screen.getAllByTestId('analysis-card')
   expect(cards[0]).toHaveTextContent('raw text')
   expect(cards[1]).toHaveTextContent('Q2')
   expect(cards[2]).toHaveTextContent('Q1')
   expect(cards[2]).toHaveTextContent('high')
+})
+
+test('explanation_renders_only_when_present', () => {
+  render(<Main />)
+  send({ type: 'AnalysisStarted', id: 1, reason: 'manual' })
+  send({
+    type: 'Analysis',
+    id: 1,
+    time: '10:00',
+    analysis: {
+      question: 'Q1',
+      suggested_answer: 'A1',
+      confidence: null,
+      explanation: 'The question asks what a heap is.',
+      raw: null,
+    },
+  })
+  expect(screen.getByText('The question asks what a heap is.')).toBeInTheDocument()
+
+  send({ type: 'AnalysisStarted', id: 2, reason: 'manual' })
+  send({
+    type: 'Analysis',
+    id: 2,
+    time: '10:01',
+    analysis: {
+      question: 'Q2',
+      suggested_answer: 'A2',
+      confidence: null,
+      explanation: null,
+      raw: null,
+    },
+  })
+  const cards = screen.getAllByTestId('analysis-card')
+  expect(cards[0]).toHaveTextContent('A2')
+  expect(cards[0]).not.toHaveTextContent('The question asks what a heap is.')
 })
 
 test('transcript_text_with_html_is_escaped', () => {

@@ -136,6 +136,7 @@ fn config(notes: &Path) -> SessionConfig {
         general_questions: false,
         name_bias: true,
         screenshot: (ScreenshotMode::Off, None, None),
+        explanation_language: String::new(),
         no_audio_after: Duration::from_secs(60),
     }
 }

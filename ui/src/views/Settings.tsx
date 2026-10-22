@@ -162,6 +162,18 @@ function Settings() {
             />
           </label>
           <label className="field">
+            <span>Explanation language</span>
+            <input
+              value={settings.explanation_language}
+              maxLength={40}
+              onChange={(event) => patch({ explanation_language: event.target.value })}
+            />
+            <small className="muted">
+              Optional. A short explanation in this language is added under each suggested answer
+              (e.g. Turkish, Deutsch). Leave empty to turn it off.
+            </small>
+          </label>
+          <label className="field">
             <span>API key</span>
             <input
               type="password"

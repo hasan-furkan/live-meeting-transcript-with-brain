@@ -2,4 +2,4 @@
 import type { Region } from "./Region";
 import type { ScreenshotMode } from "./ScreenshotMode";
 
-export type Settings = { api_base_url: string, model: string, whisper_model: string, language: string, notes_dir: string | null, name_variants: Array<string>, keywords: Array<string>, general_questions: boolean, name_bias: boolean, hotkey: string, screenshot_mode: ScreenshotMode, monitor: string | null, region: Region | null, audio_device: string | null, };
+export type Settings = { api_base_url: string, model: string, whisper_model: string, language: string, explanation_language: string, notes_dir: string | null, name_variants: Array<string>, keywords: Array<string>, general_questions: boolean, name_bias: boolean, hotkey: string, screenshot_mode: ScreenshotMode, monitor: string | null, region: Region | null, audio_device: string | null, };

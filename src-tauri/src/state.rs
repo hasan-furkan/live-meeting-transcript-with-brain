@@ -327,6 +327,7 @@ mod tests {
                 question: "What is a hash map?".to_string(),
                 suggested_answer: "A key-value store.".to_string(),
                 confidence: Some(Confidence::High),
+                explanation: None,
                 raw: None,
             },
         };
@@ -348,6 +349,7 @@ mod tests {
                 question: String::new(),
                 suggested_answer: String::new(),
                 confidence: None,
+                explanation: None,
                 raw: Some("not json at all".to_string()),
             },
         };
@@ -366,6 +368,7 @@ mod tests {
                 question: "q".repeat(150),
                 suggested_answer: "a".repeat(150),
                 confidence: None,
+                explanation: None,
                 raw: None,
             },
         };
