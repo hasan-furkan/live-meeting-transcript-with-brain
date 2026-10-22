@@ -5,11 +5,12 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_secs(2);
+const START_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct WindowsLoopback {
     device: Option<String>,
@@ -35,8 +36,23 @@ impl AudioSource for WindowsLoopback {
         self.stop.store(false, Ordering::Relaxed);
         let device = self.device.clone();
         let stop = self.stop.clone();
-        self.handle = Some(std::thread::spawn(move || run(device, tx, stop)));
-        Ok(())
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || run(device, tx, stop, ready_tx));
+        match ready_rx.recv_timeout(START_TIMEOUT) {
+            Ok(Ok(())) => {
+                self.handle = Some(handle);
+                Ok(())
+            }
+            Ok(Err(error)) => {
+                let _ = handle.join();
+                Err(error)
+            }
+            Err(_) => {
+                // The thread exits on its own once its current build returns.
+                self.stop.store(true, Ordering::Relaxed);
+                Err(CaptureError::Failed)
+            }
+        }
     }
 
     fn stop(&mut self) {
@@ -48,18 +64,25 @@ impl AudioSource for WindowsLoopback {
 }
 
 /// Owns the stream on a dedicated thread because `cpal::Stream` is not `Send`.
-fn run(device: Option<String>, tx: Sender<Vec<f32>>, stop: Arc<AtomicBool>) {
+fn run(
+    device: Option<String>,
+    tx: Sender<Vec<f32>>,
+    stop: Arc<AtomicBool>,
+    ready: Sender<Result<(), CaptureError>>,
+) {
     let failed = Arc::new(AtomicBool::new(false));
-    let mut stream: Option<cpal::Stream> = None;
-    let mut current: Option<String> = None;
-    while !stop.load(Ordering::Relaxed) {
-        if stream.is_none()
-            && let Ok((new_stream, name)) = build(device.as_deref(), &tx, &stop, &failed)
-        {
-            failed.store(false, Ordering::Relaxed);
-            stream = Some(new_stream);
-            current = Some(name);
+    // The first open failure goes back to `start`; later rebuilds retry.
+    let (mut stream, mut current) = match build(device.as_deref(), &tx, &stop, &failed) {
+        Ok((stream, name)) => {
+            let _ = ready.send(Ok(()));
+            (Some(stream), Some(name))
         }
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return;
+        }
+    };
+    while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(POLL);
         let broken = failed.swap(false, Ordering::Relaxed);
         let default_changed = device.is_none()
@@ -68,6 +91,13 @@ fn run(device: Option<String>, tx: Sender<Vec<f32>>, stop: Arc<AtomicBool>) {
         if broken || default_changed {
             stream = None;
             current = None;
+        }
+        if stream.is_none()
+            && let Ok((new_stream, name)) = build(device.as_deref(), &tx, &stop, &failed)
+        {
+            failed.store(false, Ordering::Relaxed);
+            stream = Some(new_stream);
+            current = Some(name);
         }
     }
 }
@@ -150,4 +180,16 @@ where
             None,
         )
         .map_err(|_| CaptureError::Failed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_reports_missing_named_device() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut source = WindowsLoopback::new(Some("lma-test-no-such-output-device"));
+        assert_eq!(source.start(tx), Err(CaptureError::NoDevice));
+    }
 }
