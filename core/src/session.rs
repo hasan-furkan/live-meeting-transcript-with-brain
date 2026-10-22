@@ -9,7 +9,7 @@ use crate::assist::{
 };
 use crate::capture::{AudioSource, CaptureError};
 use crate::llm::{LlmClient, LlmError, LlmImage};
-use crate::screenshot::capture as capture_screenshot;
+use crate::screenshot::{ShotError, capture as capture_screenshot};
 use crate::settings::{Region, ScreenshotMode};
 use crate::stt::{
     Backend, SegEvent, Segmenter, Transcriber, Vad, initial_prompt, is_hallucination,
@@ -37,6 +37,16 @@ const QUESTION_COOLDOWN: Duration = Duration::from_secs(30);
 const RECENT_WORDS: usize = 350;
 const CLASSIFY_WORDS: usize = 150;
 
+/// Whether an analysis carried the configured screenshot.
+#[derive(Serialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum ScreenshotStatus {
+    Off,
+    Attached,
+    Failed,
+}
+
 #[derive(Serialize, TS, Clone, Debug)]
 #[serde(tag = "type")]
 #[ts(export)]
@@ -63,6 +73,7 @@ pub enum SessionEvent {
         id: u64,
         time: String,
         analysis: Analysis,
+        screenshot: ScreenshotStatus,
     },
     AnalysisFailed {
         #[ts(type = "number")]
@@ -713,7 +724,12 @@ async fn run_analysis(
     explanation_language: String,
     sink: Sink,
 ) {
-    let image = capture_image(screenshot).await;
+    let (screenshot, image, failed) = capture_image(screenshot).await;
+    if let Some(error) = failed {
+        sink(SessionEvent::Error {
+            message: format!("Screenshot failed: {error}"),
+        });
+    }
     let (system, user) = assist_prompt(&course, &recent, image.is_some(), &explanation_language);
     let event = match llm
         .complete(&system, &user, image.as_ref(), MAX_TOKENS_ASSIST)
@@ -723,6 +739,7 @@ async fn run_analysis(
             id,
             time: clock(),
             analysis: parse_analysis(&reply),
+            screenshot,
         },
         Err(error) => SessionEvent::AnalysisFailed {
             id,
@@ -735,15 +752,19 @@ async fn run_analysis(
 /// Screenshots are taken on a blocking thread; a failure just means text-only analysis.
 async fn capture_image(
     (mode, monitor, region): (ScreenshotMode, Option<String>, Option<Region>),
-) -> Option<LlmImage> {
+) -> (ScreenshotStatus, Option<LlmImage>, Option<ShotError>) {
     if mode == ScreenshotMode::Off {
-        return None;
+        return (ScreenshotStatus::Off, None, None);
     }
-    tokio::task::spawn_blocking(move || capture_screenshot(mode, monitor.as_deref(), region))
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .flatten()
+    let shot =
+        tokio::task::spawn_blocking(move || capture_screenshot(mode, monitor.as_deref(), region))
+            .await
+            .unwrap_or(Err(ShotError::Failed));
+    match shot {
+        Ok(Some(image)) => (ScreenshotStatus::Attached, Some(image), None),
+        Ok(None) => (ScreenshotStatus::Off, None, None),
+        Err(error) => (ScreenshotStatus::Failed, None, Some(error)),
+    }
 }
 
 fn clock() -> String {

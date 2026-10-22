@@ -48,6 +48,7 @@ test('analysis_event_renders_card_newest_first', () => {
       explanation: null,
       raw: null,
     },
+    screenshot: 'off',
   })
   send({ type: 'AnalysisStarted', id: 2, reason: 'question' })
   send({
@@ -61,6 +62,7 @@ test('analysis_event_renders_card_newest_first', () => {
       explanation: null,
       raw: null,
     },
+    screenshot: 'off',
   })
   send({ type: 'AnalysisStarted', id: 3, reason: 'question' })
   send({
@@ -74,12 +76,34 @@ test('analysis_event_renders_card_newest_first', () => {
       explanation: null,
       raw: 'raw text',
     },
+    screenshot: 'off',
   })
   const cards = screen.getAllByTestId('analysis-card')
   expect(cards[0]).toHaveTextContent('raw text')
   expect(cards[1]).toHaveTextContent('Q2')
   expect(cards[2]).toHaveTextContent('Q1')
   expect(cards[2]).toHaveTextContent('high')
+})
+
+test('analysis_card_shows_the_screenshot_status', () => {
+  render(<Main />)
+  const analysis = {
+    question: 'Q',
+    suggested_answer: 'A',
+    confidence: null,
+    explanation: null,
+    raw: null,
+  }
+  send({ type: 'AnalysisStarted', id: 1, reason: 'manual' })
+  send({ type: 'Analysis', id: 1, time: '10:00', analysis, screenshot: 'attached' })
+  send({ type: 'AnalysisStarted', id: 2, reason: 'manual' })
+  send({ type: 'Analysis', id: 2, time: '10:01', analysis, screenshot: 'failed' })
+  send({ type: 'AnalysisStarted', id: 3, reason: 'manual' })
+  send({ type: 'Analysis', id: 3, time: '10:02', analysis, screenshot: 'off' })
+  const cards = screen.getAllByTestId('analysis-card')
+  expect(cards[0]).not.toHaveTextContent('screenshot')
+  expect(cards[1]).toHaveTextContent('📷 screenshot failed')
+  expect(cards[2]).toHaveTextContent('📷 with screenshot')
 })
 
 test('explanation_renders_only_when_present', () => {
@@ -96,6 +120,7 @@ test('explanation_renders_only_when_present', () => {
       explanation: 'The question asks what a heap is.',
       raw: null,
     },
+    screenshot: 'off',
   })
   expect(screen.getByText('The question asks what a heap is.')).toBeInTheDocument()
 
@@ -111,6 +136,7 @@ test('explanation_renders_only_when_present', () => {
       explanation: null,
       raw: null,
     },
+    screenshot: 'off',
   })
   const cards = screen.getAllByTestId('analysis-card')
   expect(cards[0]).toHaveTextContent('A2')

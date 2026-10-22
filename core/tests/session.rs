@@ -3,7 +3,9 @@
 use chrono::NaiveDate;
 use lma_core::capture::{AudioSource, CaptureError, WavSource};
 use lma_core::llm::LlmClient;
-use lma_core::session::{LiveTriggers, Session, SessionConfig, SessionEvent, Sink};
+use lma_core::session::{
+    LiveTriggers, ScreenshotStatus, Session, SessionConfig, SessionEvent, Sink,
+};
 use lma_core::settings::ScreenshotMode;
 use lma_core::stt::{
     Backend, EarshotVad, SttError, Transcriber, Vad, WhisperTranscriber, download_model,
@@ -356,6 +358,16 @@ fn name_in_fast_pass_emits_hit_then_analysis() {
             }
         )),
         "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            SessionEvent::Analysis {
+                screenshot: ScreenshotStatus::Off,
+                ..
+            }
+        )),
+        "screenshot mode is off: {seen:?}"
     );
 
     let bodies = server.bodies();

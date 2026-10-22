@@ -9,12 +9,20 @@ import {
 } from '../api'
 import type { Analysis } from '../bindings/Analysis'
 import type { Backend } from '../bindings/Backend'
+import type { ScreenshotStatus } from '../bindings/ScreenshotStatus'
 import CoursePicker from '../components/CoursePicker'
 
 const SCREEN_RECORDING_ERROR = 'Screen Recording permission required'
 
 type Line = { time: string; text: string }
-type Card = { id: number; time: string; analysis?: Analysis; error?: string; reason?: string }
+type Card = {
+  id: number
+  time: string
+  analysis?: Analysis
+  screenshot?: ScreenshotStatus
+  error?: string
+  reason?: string
+}
 type Summary = { path?: string; error?: string }
 
 function Main() {
@@ -50,7 +58,11 @@ function Main() {
           setCards((cards) => [{ id: event.id, time: '', reason: event.reason }, ...cards].slice(0, 30))
           break
         case 'Analysis':
-          fillCard(event.id, { time: event.time, analysis: event.analysis })
+          fillCard(event.id, {
+            time: event.time,
+            analysis: event.analysis,
+            screenshot: event.screenshot,
+          })
           break
         case 'AnalysisFailed':
           fillCard(event.id, { error: event.error })
@@ -194,6 +206,12 @@ function Main() {
                   )}
                   {card.analysis.confidence && (
                     <span className="badge">{card.analysis.confidence}</span>
+                  )}
+                  {card.screenshot === 'attached' && (
+                    <span className="badge">📷 with screenshot</span>
+                  )}
+                  {card.screenshot === 'failed' && (
+                    <span className="badge warn">📷 screenshot failed</span>
                   )}
                 </>
               ) : card.error ? (

@@ -233,6 +233,7 @@ fn first_chars(text: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use lma_core::assist::{Analysis, Confidence};
+    use lma_core::session::ScreenshotStatus;
 
     fn notes_settings() -> Settings {
         Settings {
@@ -330,6 +331,7 @@ mod tests {
                 explanation: None,
                 raw: None,
             },
+            screenshot: ScreenshotStatus::Off,
         };
         assert_eq!(
             notification_for(&event),
@@ -352,6 +354,7 @@ mod tests {
                 explanation: None,
                 raw: Some("not json at all".to_string()),
             },
+            screenshot: ScreenshotStatus::Off,
         };
         assert_eq!(
             notification_for(&event),
@@ -371,6 +374,7 @@ mod tests {
                 explanation: None,
                 raw: None,
             },
+            screenshot: ScreenshotStatus::Off,
         };
         let (_, body) = notification_for(&event).unwrap();
         assert_eq!(body.chars().count(), 200);
