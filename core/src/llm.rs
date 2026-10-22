@@ -1,7 +1,9 @@
 use reqwest::Client;
 use serde_json::{Value, json};
+use std::collections::hash_map::RandomState;
 use std::fmt;
-use std::time::Duration;
+use std::hash::BuildHasher;
+use std::time::{Duration, SystemTime};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 const RETRY_DELAY: Duration = Duration::from_secs(1);
@@ -38,6 +40,15 @@ pub struct LlmClient {
     endpoint: String,
     api_key: String,
     model: String,
+    session_id: String,
+}
+
+/// 32 lowercase hex chars from two independently seeded hashers; OpenCode Go
+/// requires some session id on every request, other providers ignore it.
+fn new_session_id() -> String {
+    let time = RandomState::new().hash_one(SystemTime::now());
+    let pid = RandomState::new().hash_one(std::process::id());
+    format!("{time:016x}{pid:016x}")
 }
 
 impl LlmClient {
@@ -53,6 +64,7 @@ impl LlmClient {
             endpoint: format!("{}/v1/messages", base_url.trim_end_matches('/')),
             api_key,
             model: model.to_string(),
+            session_id: new_session_id(),
         }
     }
 
@@ -117,6 +129,7 @@ impl LlmClient {
             .post(&self.endpoint)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("x-opencode-session", &self.session_id)
             .json(body)
             .send()
             .await
@@ -189,6 +202,14 @@ mod tests {
         assert_eq!(request.path, "/v1/messages");
         assert_eq!(request.header("x-api-key"), Some("test-key"));
         assert_eq!(request.header("anthropic-version"), Some("2023-06-01"));
+        let session = request.header("x-opencode-session").unwrap_or_default();
+        assert_eq!(session.len(), 32, "{session}");
+        assert!(
+            session
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "{session}"
+        );
         let sent: Value = serde_json::from_str(&request.body).unwrap();
         assert_eq!(sent["model"], "test-model");
         assert_eq!(sent["max_tokens"], 5);
@@ -208,6 +229,40 @@ mod tests {
         let reply = client(&server).complete("s", "u", None, 5).await.unwrap();
         assert_eq!(reply, "recovered");
         assert_eq!(server.requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn session_id_stable_across_requests_and_retry() {
+        let server = MockServer::start(vec![
+            (500, String::from("{}")),
+            (200, text_response(&["one"])),
+            (200, text_response(&["two"])),
+        ])
+        .await;
+        let client = client(&server);
+        client.complete("s", "u", None, 5).await.unwrap();
+        client.complete("s", "u", None, 5).await.unwrap();
+        let requests = server.requests();
+        assert_eq!(requests.len(), 3);
+        let first = requests[0].header("x-opencode-session").unwrap();
+        for request in &requests[1..] {
+            assert_eq!(request.header("x-opencode-session"), Some(first));
+        }
+    }
+
+    #[tokio::test]
+    async fn session_id_differs_between_clients() {
+        let server = MockServer::start(vec![
+            (200, text_response(&["a"])),
+            (200, text_response(&["b"])),
+        ])
+        .await;
+        client(&server).complete("s", "u", None, 5).await.unwrap();
+        client(&server).complete("s", "u", None, 5).await.unwrap();
+        let requests = server.requests();
+        let first = requests[0].header("x-opencode-session").unwrap();
+        let second = requests[1].header("x-opencode-session").unwrap();
+        assert_ne!(first, second);
     }
 
     #[tokio::test]
