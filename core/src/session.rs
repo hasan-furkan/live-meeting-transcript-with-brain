@@ -54,15 +54,18 @@ pub enum SessionEvent {
         context: String,
     },
     AnalysisStarted {
+        #[ts(type = "number")]
         id: u64,
         reason: String,
     },
     Analysis {
+        #[ts(type = "number")]
         id: u64,
         time: String,
         analysis: Analysis,
     },
     AnalysisFailed {
+        #[ts(type = "number")]
         id: u64,
         error: String,
     },
@@ -136,7 +139,7 @@ enum Command {
 
 pub struct Session {
     commands: Sender<Command>,
-    join: JoinHandle<Vec<String>>,
+    join: Option<JoinHandle<Vec<String>>>,
     source: Box<dyn AudioSource>,
     files: SessionFiles,
     course: String,
@@ -144,6 +147,7 @@ pub struct Session {
     llm: Option<Arc<LlmClient>>,
     rt: tokio::runtime::Handle,
     sink: Sink,
+    finished: bool,
 }
 
 impl Session {
@@ -199,6 +203,7 @@ impl Session {
             question_rate: RateLimiter::new(QUESTION_COOLDOWN),
             pending: VecDeque::new(),
             append_failing: false,
+            stt_failing: false,
             lines: Vec::new(),
             latest_partial: None,
             ids: Arc::new(AtomicU64::new(1)),
@@ -223,7 +228,7 @@ impl Session {
 
         Ok(Session {
             commands,
-            join,
+            join: Some(join),
             source,
             files,
             course,
@@ -231,6 +236,7 @@ impl Session {
             llm,
             rt,
             sink,
+            finished: false,
         })
     }
 
@@ -239,25 +245,30 @@ impl Session {
         let _ = self.commands.send(Command::AskNow);
     }
 
+    fn shut_down(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.finished = true;
+        self.source.stop();
+        let _ = self.commands.send(Command::Finish);
+    }
+
     /// Stops capture and the STT thread, then summarizes on the runtime; the result
     /// arrives later as `SummaryWritten` or `SummaryFailed`.
-    pub fn stop(self) -> Result<(), SessionError> {
-        let Session {
-            commands,
-            join,
-            mut source,
-            files,
-            course,
-            date,
-            llm,
-            rt,
-            sink,
-        } = self;
-        source.stop();
-        let _ = commands.send(Command::Finish);
-        drop(commands);
+    pub fn stop(mut self) -> Result<(), SessionError> {
+        self.shut_down();
+        let Some(join) = self.join.take() else {
+            return Err(SessionError::Thread);
+        };
         let lines = join.join().map_err(|_| SessionError::Thread)?;
         let transcript = lines.join("\n");
+        let files = self.files.clone();
+        let course = self.course.clone();
+        let date = self.date;
+        let llm = self.llm.clone();
+        let rt = self.rt.clone();
+        let sink = Arc::clone(&self.sink);
 
         rt.spawn(async move {
             let Some(llm) = llm else {
@@ -313,6 +324,14 @@ impl Session {
     }
 }
 
+impl Drop for Session {
+    /// A session dropped without `stop()` still stops capture and asks the STT thread to
+    /// finish; the thread is detached rather than joined.
+    fn drop(&mut self) {
+        self.shut_down();
+    }
+}
+
 /// Transcript body after the closing frontmatter line, without the `**[HH:MM:SS]** ` stamps.
 fn transcript_text(text: &str) -> String {
     let mut lines = text.lines();
@@ -357,6 +376,7 @@ struct Worker {
     /// Lines that could not be written yet, oldest first.
     pending: VecDeque<(NaiveTime, String)>,
     append_failing: bool,
+    stt_failing: bool,
     /// Every final line, for the summary.
     lines: Vec<String>,
     latest_partial: Option<String>,
@@ -426,7 +446,21 @@ impl Worker {
     /// The VAD gate lives in the segmenter: both passes only see speech segments.
     fn transcribe(&mut self, samples: &[f32]) -> Option<String> {
         let prompt = self.prompt.as_deref();
-        let text = self.stt.transcribe(samples, prompt).ok()?;
+        let text = match self.stt.transcribe(samples, prompt) {
+            Ok(text) => {
+                self.stt_failing = false;
+                text
+            }
+            Err(_) => {
+                if !self.stt_failing {
+                    self.stt_failing = true;
+                    (self.sink)(SessionEvent::Error {
+                        message: "Transcription failed; retrying".to_string(),
+                    });
+                }
+                return None;
+            }
+        };
         if is_hallucination(&text, prompt) {
             return None;
         }
@@ -549,6 +583,7 @@ impl Worker {
             self.pending.front().map(|(t, s)| (*t, s.clone()))
         {
             if self.writer.append(pending_time, &pending_text).is_err() {
+                self.pending.push_back((time, text.to_string()));
                 self.report_append_failure();
                 return;
             }

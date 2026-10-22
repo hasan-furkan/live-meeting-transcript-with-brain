@@ -12,7 +12,9 @@ use lma_core::stt::{
 use lma_core::triggers::HitKind;
 use lma_core::vault::allocate_session;
 use serde_json::{Value, json};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -86,7 +88,10 @@ impl Vad for ThresholdVad {
 /// these tests are ~1.3 s, so the length tells the two passes apart.
 struct FakeTranscriber {
     fast: String,
-    finals: std::collections::VecDeque<String>,
+    finals: VecDeque<String>,
+    /// Tests flip this to simulate a failing STT backend.
+    failing: Arc<AtomicBool>,
+    calls: Arc<AtomicUsize>,
 }
 
 impl FakeTranscriber {
@@ -94,12 +99,18 @@ impl FakeTranscriber {
         Self {
             fast: fast.to_string(),
             finals: finals.iter().map(|s| s.to_string()).collect(),
+            failing: Arc::new(AtomicBool::new(false)),
+            calls: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
 
 impl Transcriber for FakeTranscriber {
     fn transcribe(&mut self, pcm16k: &[f32], _prompt: Option<&str>) -> Result<String, SttError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        if self.failing.load(Ordering::Relaxed) {
+            return Err(SttError::TranscriptionFailed);
+        }
         if pcm16k.len() >= 30_000 {
             return Ok(self.fast.clone());
         }
@@ -483,6 +494,305 @@ fn append_failure_is_buffered_and_retried() {
     let third = file.find("third line").unwrap();
     assert!(first < second && second < third, "{file}");
     assert_eq!(file.lines().filter(|l| l.starts_with("**[")).count(), 3);
+}
+
+#[test]
+fn consecutive_append_failures_keep_all_lines() {
+    let rt = Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path());
+    let transcript = cfg.files.transcript.clone();
+    let input = Input::default();
+    let (session, events) = start_fake(
+        &rt,
+        cfg,
+        FakeTranscriber::new("", &["line one", "line two", "line three", "line four"]),
+        None,
+        &input,
+    );
+    let error_count = |events: &[SessionEvent]| {
+        events
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::Error { .. }))
+            .count()
+    };
+
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| {
+        e.iter()
+            .any(|x| matches!(x, SessionEvent::Line { text, .. } if text == "line one"))
+    });
+
+    set_readonly(&transcript, true);
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| {
+        e.iter()
+            .any(|x| matches!(x, SessionEvent::Line { text, .. } if text == "line two"))
+    });
+    input.speech(500);
+    input.silence(1_000);
+    let seen = wait_for(&events, WAIT, |e| {
+        e.iter()
+            .any(|x| matches!(x, SessionEvent::Line { text, .. } if text == "line three"))
+    });
+    assert_eq!(error_count(&seen), 1, "one error per streak: {seen:?}");
+
+    set_readonly(&transcript, false);
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| {
+        e.iter()
+            .any(|x| matches!(x, SessionEvent::Line { text, .. } if text == "line four"))
+    });
+
+    session.stop().unwrap();
+    let file = std::fs::read_to_string(&transcript).unwrap();
+    let positions: Vec<usize> = ["line one", "line two", "line three", "line four"]
+        .iter()
+        .map(|line| {
+            file.find(line)
+                .unwrap_or_else(|| panic!("missing {line}: {file}"))
+        })
+        .collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{file}");
+    assert_eq!(file.lines().filter(|l| l.starts_with("**[")).count(), 4);
+    assert_eq!(error_count(&snapshot(&events)), 1);
+}
+
+#[test]
+fn transcription_error_reported_once_per_streak() {
+    let rt = Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let input = Input::default();
+    let failing = Arc::new(AtomicBool::new(true));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let stt = FakeTranscriber {
+        fast: String::new(),
+        finals: VecDeque::from(["recovered line".to_string()]),
+        failing: Arc::clone(&failing),
+        calls: Arc::clone(&calls),
+    };
+    let (session, events) = start_fake(&rt, config(dir.path()), stt, None, &input);
+    let error_count =
+        |events: &[SessionEvent]| {
+            events
+            .iter()
+            .filter(|e| matches!(
+                e,
+                SessionEvent::Error { message } if message == "Transcription failed; retrying"
+            ))
+            .count()
+        };
+
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| error_count(e) == 1);
+
+    // Two more failing utterances must not produce a second error for the streak.
+    let before = calls.load(Ordering::Relaxed);
+    input.speech(500);
+    input.silence(1_000);
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |_| {
+        calls.load(Ordering::Relaxed) >= before + 2
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        error_count(&snapshot(&events)),
+        1,
+        "one error per failure streak"
+    );
+
+    // A successful transcription ends the streak.
+    failing.store(false, Ordering::Relaxed);
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| {
+        e.iter()
+            .any(|x| matches!(x, SessionEvent::Line { text, .. } if text == "recovered line"))
+    });
+
+    // The next failure starts a new streak and is reported again.
+    failing.store(true, Ordering::Relaxed);
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| error_count(e) == 2);
+
+    session.stop().unwrap();
+}
+
+#[test]
+fn general_question_yes_emits_question_detected_and_analysis() {
+    let rt = Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start(vec![
+        (200, text_reply("YES")),
+        (200, text_reply(ASSIST_JSON)),
+    ]));
+    let llm = Arc::new(LlmClient::new(&server.url, "test-key".into(), "test-model"));
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(dir.path());
+    cfg.general_questions = true;
+    let input = Input::default();
+    let (session, events) = start_fake(
+        &rt,
+        cfg,
+        FakeTranscriber::new("", &["Who can tell me the runtime?"]),
+        Some(llm),
+        &input,
+    );
+
+    input.speech(500);
+    input.silence(1_000);
+
+    let seen = wait_for(&events, WAIT, |e| {
+        e.iter().any(|x| matches!(x, SessionEvent::Analysis { .. }))
+    });
+    let detected = position(
+        &seen,
+        |e| matches!(e, SessionEvent::QuestionDetected { text } if text == "Who can tell me the runtime?"),
+    )
+    .expect("question detected");
+    let started = position(
+        &seen,
+        |e| matches!(e, SessionEvent::AnalysisStarted { reason, .. } if reason == "question"),
+    )
+    .expect("question analysis started");
+    let analysed = position(&seen, |e| matches!(e, SessionEvent::Analysis { .. })).unwrap();
+    assert!(detected < started && started < analysed, "{seen:?}");
+    assert_eq!(
+        server.bodies().len(),
+        2,
+        "one classification then one assist call"
+    );
+
+    session.stop().unwrap();
+}
+
+#[test]
+fn general_question_no_emits_nothing() {
+    let rt = Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start(vec![(200, text_reply("NO"))]));
+    let llm = Arc::new(LlmClient::new(&server.url, "test-key".into(), "test-model"));
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(dir.path());
+    cfg.general_questions = true;
+    let input = Input::default();
+    let (session, events) = start_fake(
+        &rt,
+        cfg,
+        FakeTranscriber::new("", &["Who can tell me the runtime?"]),
+        Some(llm),
+        &input,
+    );
+
+    input.speech(500);
+    input.silence(1_000);
+
+    let deadline = Instant::now() + WAIT;
+    while server.bodies().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "classification request never arrived"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let seen = snapshot(&events);
+    assert!(
+        !seen.iter().any(|e| matches!(
+            e,
+            SessionEvent::QuestionDetected { .. }
+                | SessionEvent::AnalysisStarted { .. }
+                | SessionEvent::Analysis { .. }
+        )),
+        "{seen:?}"
+    );
+
+    session.stop().unwrap();
+}
+
+#[test]
+fn stop_writes_summary_file() {
+    let rt = Runtime::new().unwrap();
+    let body = json!({
+        "summary": "Merge sort was introduced.",
+        "notes": "- Merge sort is O(n log n).",
+        "action_items": ["Read chapter 2"],
+    })
+    .to_string();
+    let server = rt.block_on(MockServer::start(vec![(200, text_reply(&body))]));
+    let llm = Arc::new(LlmClient::new(&server.url, "test-key".into(), "test-model"));
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path());
+    let summary = cfg.files.summary.clone();
+    let input = Input::default();
+    let (session, events) = start_fake(
+        &rt,
+        cfg,
+        FakeTranscriber::new("", &["Today we cover merge sort"]),
+        Some(llm),
+        &input,
+    );
+
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| {
+        e.iter().any(|x| matches!(x, SessionEvent::Line { .. }))
+    });
+    session.stop().unwrap();
+
+    let seen = wait_for(&events, WAIT, |e| {
+        e.iter().any(|x| {
+            matches!(
+                x,
+                SessionEvent::SummaryWritten { .. } | SessionEvent::SummaryFailed { .. }
+            )
+        })
+    });
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            SessionEvent::SummaryWritten { path } if *path == summary.display().to_string()
+        )),
+        "{seen:?}"
+    );
+    let file = std::fs::read_to_string(&summary).unwrap();
+    assert!(file.contains("## Action items"), "{file}");
+    assert!(file.contains("- [ ] Read chapter 2"), "{file}");
+    assert_eq!(server.bodies().len(), 1, "one summary call");
+}
+
+#[test]
+fn drop_without_stop_stops_the_source() {
+    struct Tracked(Arc<AtomicBool>);
+    impl AudioSource for Tracked {
+        fn start(&mut self, _tx: Sender<Vec<f32>>) -> Result<(), CaptureError> {
+            Ok(())
+        }
+        fn stop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    let rt = Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let (sink, _events) = collector();
+    let session = Session::start(
+        config(dir.path()),
+        Box::new(Tracked(Arc::clone(&stopped))),
+        Box::new(FakeTranscriber::new("", &[])),
+        Box::new(ThresholdVad),
+        None,
+        rt.handle().clone(),
+        sink,
+    )
+    .unwrap();
+    drop(session);
+    assert!(stopped.load(Ordering::Relaxed), "Drop must stop the source");
 }
 
 #[test]

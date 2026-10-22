@@ -83,6 +83,7 @@ pub fn list_courses(notes_dir: &Path) -> Result<Vec<String>, VaultError> {
     Ok(courses)
 }
 
+#[derive(Clone)]
 pub struct SessionFiles {
     pub transcript: PathBuf,
     pub summary: PathBuf,
