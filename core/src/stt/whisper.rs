@@ -1,4 +1,5 @@
 use super::SttError;
+use super::model::valid_model_file_name;
 use serde::Serialize;
 use std::path::Path;
 use ts_rs::TS;
@@ -26,6 +27,13 @@ pub struct WhisperTranscriber {
 
 impl WhisperTranscriber {
     pub fn load(model_path: &Path, language: &str) -> Result<Self, SttError> {
+        let named = model_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(valid_model_file_name);
+        if !named {
+            return Err(SttError::InvalidModelName);
+        }
         if !model_path.is_file() {
             return Err(SttError::ModelMissing);
         }
@@ -93,7 +101,15 @@ mod tests {
 
     #[test]
     fn load_missing_model_fails() {
-        let err = WhisperTranscriber::load(Path::new("does-not-exist.bin"), "en").err();
+        let err = WhisperTranscriber::load(Path::new("ggml-does-not-exist.bin"), "en").err();
         assert_eq!(err, Some(SttError::ModelMissing));
+    }
+
+    #[test]
+    fn load_rejects_unsafe_model_file_name() {
+        let err = WhisperTranscriber::load(Path::new("models/evil.bin"), "en").err();
+        assert_eq!(err, Some(SttError::InvalidModelName));
+        let err = WhisperTranscriber::load(Path::new("models/ggml-../evil.bin"), "en").err();
+        assert_eq!(err, Some(SttError::InvalidModelName));
     }
 }

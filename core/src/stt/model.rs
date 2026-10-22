@@ -3,12 +3,33 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const TREE_URL: &str = "https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main";
 const RESOLVE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_REDIRECTS: usize = 10;
 
 pub fn model_file_name(model: &str) -> String {
     format!("ggml-{model}.bin")
+}
+
+/// Non-empty, at most 64 chars of `[A-Za-z0-9._-]`, never `..`.
+pub fn valid_model_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// `ggml-<valid name>.bin`: the only file name ever joined under the models folder.
+pub(crate) fn valid_model_file_name(file: &str) -> bool {
+    file.strip_prefix("ggml-")
+        .and_then(|rest| rest.strip_suffix(".bin"))
+        .is_some_and(valid_model_name)
 }
 
 /// SHA-256 (hex) and size from the tree listing entry, both only present for LFS files.
@@ -32,6 +53,9 @@ pub async fn download_model(
     dir: &Path,
     progress: impl Fn(u64, u64),
 ) -> Result<PathBuf, SttError> {
+    if !valid_model_name(model) {
+        return Err(SttError::InvalidModelName);
+    }
     let name = model_file_name(model);
     let dest = dir.join(&name);
     if dest.is_file() {
@@ -39,7 +63,19 @@ pub async fn download_model(
     }
     std::fs::create_dir_all(dir).map_err(|_| SttError::DownloadFailed)?;
 
-    let http = reqwest::Client::new();
+    // Redirects stay on HTTPS and are capped, so a downgrade cannot strip TLS.
+    let http = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= MAX_REDIRECTS || attempt.url().scheme() != "https" {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        }))
+        .build()
+        .map_err(|_| SttError::DownloadFailed)?;
     let tree: Value = http
         .get(TREE_URL)
         .send()
@@ -100,6 +136,39 @@ mod tests {
     fn model_file_name_has_ggml_prefix() {
         assert_eq!(model_file_name("tiny"), "ggml-tiny.bin");
         assert_eq!(model_file_name("large-v3-turbo"), "ggml-large-v3-turbo.bin");
+    }
+
+    #[test]
+    fn model_name_accepts_only_safe_characters() {
+        assert!(valid_model_name("large-v3-turbo-q5_0"));
+        assert!(valid_model_name("tiny.en"));
+        assert!(valid_model_name("base"));
+        assert!(!valid_model_name(""));
+        assert!(!valid_model_name(".."));
+        assert!(!valid_model_name("../evil"));
+        assert!(!valid_model_name("a/b"));
+        assert!(!valid_model_name("a\\b"));
+        assert!(!valid_model_name("tiny bin"));
+        assert!(!valid_model_name(&"a".repeat(65)));
+        assert!(valid_model_name(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn model_file_name_must_be_ggml_bin() {
+        assert!(valid_model_file_name("ggml-tiny.bin"));
+        assert!(!valid_model_file_name("evil.bin"));
+        assert!(!valid_model_file_name("ggml-../evil.bin"));
+        assert!(!valid_model_file_name("ggml-tiny.txt"));
+    }
+
+    #[tokio::test]
+    async fn download_rejects_invalid_name_before_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = download_model("../evil", dir.path(), |_, _| {})
+            .await
+            .unwrap_err();
+        assert_eq!(err, SttError::InvalidModelName);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[test]

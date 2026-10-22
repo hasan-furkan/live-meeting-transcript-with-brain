@@ -7,13 +7,14 @@ use crate::state::{
 };
 use chrono::Local;
 use lma_core::capture::{list_output_devices as core_output_devices, system_source};
-use lma_core::llm::LlmClient;
+use lma_core::llm::{LlmClient, validate_api_base_url};
 use lma_core::session::{Session, SessionConfig, SessionEvent, Sink};
 use lma_core::settings::{
     Region, Settings, get_api_key, save as save_settings_file, set_api_key as store_api_key,
 };
 use lma_core::stt::{
     EarshotVad, WhisperTranscriber, download_model as download_whisper_model, model_file_name,
+    valid_model_name,
 };
 use lma_core::vault::{allocate_session, list_courses as list_vault_courses};
 use std::sync::Arc;
@@ -24,12 +25,19 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 const INVALID_HOTKEY: &str = "Invalid hotkey";
 const SAVE_FAILED: &str = "Could not save settings";
 const API_KEY_MISSING: &str = "API key missing";
+const INVALID_API_URL: &str = "Invalid API URL";
+const INVALID_MODEL_NAME: &str = "Invalid Whisper model name";
+const NOTES_NOT_FOUND: &str = "Notes folder not found";
 
 fn stored_api_key() -> Option<String> {
     get_api_key().ok().flatten().filter(|key| !key.is_empty())
 }
 
 fn llm_from(settings: &Settings) -> Option<Arc<LlmClient>> {
+    // An invalid URL means no assist, exactly as when the key is missing.
+    if validate_api_base_url(&settings.api_base_url).is_err() {
+        return None;
+    }
     stored_api_key()
         .map(|key| Arc::new(LlmClient::new(&settings.api_base_url, key, &settings.model)))
 }
@@ -45,8 +53,24 @@ pub fn get_settings(app: AppHandle) -> Settings {
     lock(&app.state::<AppState>().settings).clone()
 }
 
+/// The webview is untrusted: every value that later reaches the network or the
+/// filesystem is checked here, before it is stored.
 #[tauri::command]
-pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), String> {
+    if validate_api_base_url(&settings.api_base_url).is_err() {
+        return Err(INVALID_API_URL.to_string());
+    }
+    if !valid_model_name(&settings.whisper_model) {
+        return Err(INVALID_MODEL_NAME.to_string());
+    }
+    if let Some(notes) = &settings.notes_dir {
+        let canonical = notes
+            .canonicalize()
+            .ok()
+            .filter(|path| path.is_dir())
+            .ok_or_else(|| NOTES_NOT_FOUND.to_string())?;
+        settings.notes_dir = Some(canonical);
+    }
     let state = app.state::<AppState>();
     let old = lock(&state.settings).clone();
     // Persist first: a hotkey switch that fails must leave file, state and live shortcut unchanged.
@@ -205,6 +229,9 @@ pub async fn retry_summary(app: AppHandle) -> Result<(), String> {
         return Err("No transcript to summarize".to_string());
     };
     let settings = lock(&state.settings).clone();
+    if validate_api_base_url(&settings.api_base_url).is_err() {
+        return Err(INVALID_API_URL.to_string());
+    }
     let key = stored_api_key().ok_or_else(|| API_KEY_MISSING.to_string())?;
     let llm = LlmClient::new(&settings.api_base_url, key, &settings.model);
 

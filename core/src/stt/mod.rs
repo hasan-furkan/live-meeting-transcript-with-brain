@@ -7,7 +7,7 @@ mod vad;
 mod whisper;
 
 pub use filter::{initial_prompt, is_hallucination};
-pub use model::{download_model, model_file_name};
+pub use model::{download_model, model_file_name, valid_model_name};
 pub use segmenter::{SegEvent, Segmenter};
 pub use vad::{EarshotVad, Vad};
 pub use whisper::{Backend, Transcriber, WhisperTranscriber};
@@ -21,6 +21,7 @@ pub enum SttError {
     TranscriptionFailed,
     DownloadFailed,
     ChecksumMismatch,
+    InvalidModelName,
 }
 
 impl fmt::Display for SttError {
@@ -31,6 +32,7 @@ impl fmt::Display for SttError {
             Self::TranscriptionFailed => write!(f, "transcription failed"),
             Self::DownloadFailed => write!(f, "download failed"),
             Self::ChecksumMismatch => write!(f, "checksum mismatch"),
+            Self::InvalidModelName => write!(f, "invalid model name"),
         }
     }
 }

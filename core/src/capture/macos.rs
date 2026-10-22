@@ -11,6 +11,7 @@ use std::sync::mpsc::Sender;
 const SAMPLE_RATE: u32 = 48_000;
 const CHANNELS: u16 = 2;
 const POLL: std::time::Duration = std::time::Duration::from_millis(100);
+const START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub struct MacSystemAudio {
     stop: Arc<AtomicBool>,
@@ -35,7 +36,14 @@ impl AudioSource for MacSystemAudio {
         let stop = self.stop.clone();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || run(tx, stop, ready_tx));
-        let result = ready_rx.recv().unwrap_or(Err(CaptureError::Failed));
+        let result = match ready_rx.recv_timeout(START_TIMEOUT) {
+            Ok(result) => result,
+            Err(_) => {
+                // The thread exits on its own once ScreenCaptureKit returns.
+                self.stop.store(true, Ordering::Relaxed);
+                Err(CaptureError::Failed)
+            }
+        };
         if result.is_ok() {
             self.handle = Some(handle);
         } else {

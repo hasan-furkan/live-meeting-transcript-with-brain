@@ -9,6 +9,31 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// `https` anywhere; plain `http` only to the local machine (local proxies).
+/// Rejects userinfo, query and fragment so the key never goes to a host the user did not mean.
+pub fn validate_api_base_url(s: &str) -> Result<(), &'static str> {
+    const INVALID: &str = "Invalid API URL";
+    let url = reqwest::Url::parse(s).map_err(|_| INVALID)?;
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(INVALID);
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(INVALID);
+    }
+    match url.scheme() {
+        "https" => Ok(()),
+        "http"
+            if matches!(
+                url.host_str(),
+                Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
+            ) =>
+        {
+            Ok(())
+        }
+        _ => Err(INVALID),
+    }
+}
+
 pub struct LlmImage {
     pub media_type: String,
     pub base64: String,
@@ -179,6 +204,44 @@ mod tests {
 
     fn client(server: &MockServer) -> LlmClient {
         LlmClient::new(&server.url, "test-key".into(), "test-model")
+    }
+
+    #[test]
+    fn api_url_accepts_https_and_local_http() {
+        assert!(validate_api_base_url("https://opencode.ai/inference/go/anthropic").is_ok());
+        assert!(validate_api_base_url("http://localhost:8080").is_ok());
+        assert!(validate_api_base_url("http://127.0.0.1:8080/v1").is_ok());
+        assert!(validate_api_base_url("http://[::1]:8080").is_ok());
+    }
+
+    #[test]
+    fn api_url_rejects_cleartext_remote_and_userinfo() {
+        assert_eq!(
+            validate_api_base_url("http://example.com"),
+            Err("Invalid API URL")
+        );
+        assert_eq!(
+            validate_api_base_url("https://user:pw@example.com"),
+            Err("Invalid API URL")
+        );
+        assert_eq!(
+            validate_api_base_url("https://user@example.com"),
+            Err("Invalid API URL")
+        );
+        assert_eq!(
+            validate_api_base_url("https://example.com/?q=1"),
+            Err("Invalid API URL")
+        );
+        assert_eq!(
+            validate_api_base_url("https://example.com/#frag"),
+            Err("Invalid API URL")
+        );
+        assert_eq!(
+            validate_api_base_url("ftp://example.com"),
+            Err("Invalid API URL")
+        );
+        assert_eq!(validate_api_base_url("not a url"), Err("Invalid API URL"));
+        assert_eq!(validate_api_base_url(""), Err("Invalid API URL"));
     }
 
     #[tokio::test]
