@@ -5,6 +5,7 @@ all-features = false
 version = 2
 yanked = "deny"
 unmaintained = "workspace"
+unsound = "workspace"
 
 [licenses]
 version = 2
