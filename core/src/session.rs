@@ -105,6 +105,15 @@ pub struct SessionConfig {
     pub no_audio_after: Duration,
 }
 
+/// Trigger settings saved mid-session; the STT thread applies them to the live session.
+pub struct LiveTriggers {
+    pub names: Vec<String>,
+    pub keywords: Vec<String>,
+    pub general_questions: bool,
+    pub name_bias: bool,
+    pub explanation_language: String,
+}
+
 pub type Sink = Arc<dyn Fn(SessionEvent) + Send + Sync>;
 
 #[derive(Debug)]
@@ -136,6 +145,7 @@ impl std::error::Error for SessionError {}
 
 enum Command {
     AskNow,
+    Triggers(LiveTriggers),
     Finish,
 }
 
@@ -247,6 +257,11 @@ impl Session {
     /// Non-blocking: the request is queued for the STT thread, which snapshots the context.
     pub fn ask_now(&self) {
         let _ = self.commands.send(Command::AskNow);
+    }
+
+    /// Non-blocking: the STT thread rebuilds the matcher and prompt between segments.
+    pub fn update_triggers(&self, triggers: LiveTriggers) {
+        let _ = self.commands.send(Command::Triggers(triggers));
     }
 
     fn shut_down(&mut self) {
@@ -402,6 +417,7 @@ impl Worker {
             if audio_done {
                 match self.commands.recv_timeout(TICK) {
                     Ok(Command::AskNow) => self.analyze("manual"),
+                    Ok(Command::Triggers(t)) => self.apply_triggers(t),
                     Ok(Command::Finish) => break,
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => break,
@@ -430,11 +446,27 @@ impl Worker {
         loop {
             match self.commands.try_recv() {
                 Ok(Command::AskNow) => self.analyze("manual"),
+                Ok(Command::Triggers(t)) => self.apply_triggers(t),
                 Ok(Command::Finish) => return true,
                 Err(TryRecvError::Empty) => return false,
                 Err(TryRecvError::Disconnected) => return true,
             }
         }
+    }
+
+    /// Fresh cooldowns are fine, and the new prompt applies from the next segment on.
+    fn apply_triggers(&mut self, triggers: LiveTriggers) {
+        let LiveTriggers {
+            names,
+            keywords,
+            general_questions,
+            name_bias,
+            explanation_language,
+        } = triggers;
+        self.matcher = Matcher::new(&names, &keywords);
+        self.prompt = initial_prompt(&names, name_bias);
+        self.general_questions = general_questions;
+        self.explanation_language = explanation_language;
     }
 
     fn ingest(&mut self, chunk: &[f32]) {

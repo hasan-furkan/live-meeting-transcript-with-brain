@@ -3,7 +3,7 @@
 use chrono::NaiveDate;
 use lma_core::capture::{AudioSource, CaptureError, WavSource};
 use lma_core::llm::LlmClient;
-use lma_core::session::{Session, SessionConfig, SessionEvent, Sink};
+use lma_core::session::{LiveTriggers, Session, SessionConfig, SessionEvent, Sink};
 use lma_core::settings::ScreenshotMode;
 use lma_core::stt::{
     Backend, EarshotVad, SttError, Transcriber, Vad, WhisperTranscriber, download_model,
@@ -366,6 +366,82 @@ fn name_in_fast_pass_emits_hit_then_analysis() {
     let prompt = content[0]["text"].as_str().unwrap();
     assert!(prompt.contains("Course: Algorithms 101"), "{prompt}");
     assert!(prompt.contains("Jordan, what is merge sort?"), "{prompt}");
+
+    session.stop().unwrap();
+}
+
+#[test]
+fn updated_names_apply_to_running_session() {
+    let rt = Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(dir.path());
+    cfg.names = Vec::new();
+    cfg.keywords = Vec::new();
+    let input = Input::default();
+    let (session, events) = start_fake(
+        &rt,
+        cfg,
+        FakeTranscriber::new(
+            "",
+            &[
+                "Nothing hot here",
+                "Python is great",
+                "the deadline is Friday",
+            ],
+        ),
+        None,
+        &input,
+    );
+
+    input.speech(500);
+    input.silence(1_000);
+    let seen = wait_for(&events, WAIT, |e| {
+        e.iter()
+            .any(|x| matches!(x, SessionEvent::Line { text, .. } if text == "Nothing hot here"))
+    });
+    assert!(
+        !seen.iter().any(|e| matches!(e, SessionEvent::Hit { .. })),
+        "{seen:?}"
+    );
+
+    session.update_triggers(LiveTriggers {
+        names: vec!["Python".to_string()],
+        keywords: vec!["deadline".to_string()],
+        general_questions: false,
+        name_bias: true,
+        explanation_language: String::new(),
+    });
+    // The command channel is polled on the STT thread's next audio tick.
+    std::thread::sleep(Duration::from_millis(400));
+
+    input.speech(500);
+    input.silence(1_000);
+    wait_for(&events, WAIT, |e| {
+        e.iter()
+            .any(|x| matches!(x, SessionEvent::Line { text, .. } if text == "Python is great"))
+    });
+    input.speech(500);
+    input.silence(1_000);
+    let seen = wait_for(&events, WAIT, |e| {
+        e.iter().any(
+            |x| matches!(x, SessionEvent::Line { text, .. } if text == "the deadline is Friday"),
+        )
+    });
+
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            SessionEvent::Hit { kind: HitKind::Name, term, .. } if term == "Python"
+        )),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            SessionEvent::Hit { kind: HitKind::Keyword, term, .. } if term == "deadline"
+        )),
+        "{seen:?}"
+    );
 
     session.stop().unwrap();
 }

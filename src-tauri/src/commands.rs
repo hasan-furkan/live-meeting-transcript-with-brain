@@ -8,7 +8,7 @@ use crate::state::{
 use chrono::Local;
 use lma_core::capture::{CaptureError, list_output_devices as core_output_devices, system_source};
 use lma_core::llm::{LlmClient, validate_api_base_url};
-use lma_core::session::{Session, SessionConfig, SessionError, SessionEvent, Sink};
+use lma_core::session::{LiveTriggers, Session, SessionConfig, SessionError, SessionEvent, Sink};
 use lma_core::settings::{
     Region, Settings, get_api_key, save as save_settings_file, set_api_key as store_api_key,
 };
@@ -110,7 +110,17 @@ pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), Strin
             return Err(INVALID_HOTKEY.to_string());
         }
     }
+    let live = LiveTriggers {
+        names: settings.name_variants.clone(),
+        keywords: settings.keywords.clone(),
+        general_questions: settings.general_questions,
+        name_bias: settings.name_bias,
+        explanation_language: settings.explanation_language.clone(),
+    };
     *lock(&state.settings) = settings;
+    if let Some(session) = lock(&state.session).as_ref() {
+        session.update_triggers(live);
+    }
     Ok(())
 }
 

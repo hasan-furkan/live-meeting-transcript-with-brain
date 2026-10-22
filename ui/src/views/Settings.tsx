@@ -250,6 +250,7 @@ function Settings() {
               onChange={(event) => patch({ name_variants: event.target.value.split('\n') })}
             />
           </label>
+          <p className="muted">Changes apply immediately, also during a running session.</p>
           <label className="field">
             <span>Keywords</span>
             <textarea
