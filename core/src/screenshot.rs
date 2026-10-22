@@ -76,7 +76,7 @@ pub fn capture(
             let region = region.ok_or(ShotError::NoRegion)?;
             let width = chosen.width().map_err(|_| ShotError::Failed)?;
             let height = chosen.height().map_err(|_| ShotError::Failed)?;
-            let region = clamp_region(region, width, height).ok_or(ShotError::Failed)?;
+            let region = clamp_region(region, width, height).ok_or(ShotError::NoRegion)?;
             chosen.capture_region(
                 region.x as u32,
                 region.y as u32,

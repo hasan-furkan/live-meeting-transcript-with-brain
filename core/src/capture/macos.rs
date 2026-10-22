@@ -112,9 +112,8 @@ fn start_stream(tx: Sender<Vec<f32>>, stop: &Arc<AtomicBool>) -> Result<SCStream
 
 fn map_error(error: SCError) -> CaptureError {
     match error {
-        SCError::PermissionDenied(_) | SCError::NoShareableContent(_) => {
-            CaptureError::PermissionDenied
-        }
+        SCError::PermissionDenied(_) => CaptureError::PermissionDenied,
+        SCError::NoShareableContent(_) => CaptureError::NoDevice,
         _ => CaptureError::Failed,
     }
 }
