@@ -33,39 +33,44 @@ function CoursePicker({ error, onSubmit, onCancel }: Props) {
   }
 
   return (
-    <section className="picker" aria-label="Choose course">
-      <h2>Choose course</h2>
-      <ul>
-        {courses.map((course) => (
-          <li key={course}>
-            <button onClick={() => onSubmit(course)}>{course}</button>
-          </li>
-        ))}
-      </ul>
-      <label className="field">
-        <span>New course…</span>
-        <input
-          aria-label="New course"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') submit()
-          }}
-        />
-      </label>
-      <div className="actions">
-        <button onClick={submit} disabled={name.trim() === ''}>
-          OK
-        </button>
-        <button onClick={onCancel}>Cancel</button>
-      </div>
-      {loadError && <p className="error">{loadError}</p>}
-      {error && (
-        <p className="error">
-          {error} {error.includes('Settings') && <a href="#/settings">Open Settings</a>}
-        </p>
-      )}
-    </section>
+    <div className="modal-backdrop">
+      <section className="picker modal" aria-label="Choose course">
+        <div className="picker-head">
+          <h2>Choose course</h2>
+          <span className="muted">Start a new transcription session</span>
+        </div>
+        <ul>
+          {courses.map((course) => (
+            <li key={course}>
+              <button onClick={() => onSubmit(course)}>{course}</button>
+            </li>
+          ))}
+        </ul>
+        <label className="field">
+          <span>New course…</span>
+          <input
+            aria-label="New course"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') submit()
+            }}
+          />
+        </label>
+        <div className="row picker-actions">
+          <button className="primary" onClick={submit} disabled={name.trim() === ''}>
+            OK
+          </button>
+          <button onClick={onCancel}>Cancel</button>
+        </div>
+        {loadError && <p className="error">{loadError}</p>}
+        {error && (
+          <p className="error">
+            {error} {error.includes('Settings') && <a href="#/settings">Open Settings</a>}
+          </p>
+        )}
+      </section>
+    </div>
   )
 }
 

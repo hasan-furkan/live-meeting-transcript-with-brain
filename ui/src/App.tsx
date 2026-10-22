@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Main from './views/Main'
 import Settings from './views/Settings'
 import RegionPicker from './views/RegionPicker'
+import { IDLE, type SessionStatus } from './components/Header'
 
 function currentRoute(): string {
   return window.location.hash || '#/'
@@ -9,6 +10,7 @@ function currentRoute(): string {
 
 function App() {
   const [route, setRoute] = useState(currentRoute)
+  const [status, setStatus] = useState<SessionStatus>(IDLE)
 
   useEffect(() => {
     const onChange = () => setRoute(currentRoute())
@@ -22,9 +24,9 @@ function App() {
   return (
     <>
       <div hidden={route !== '#/'}>
-        <Main />
+        <Main onStatusChange={setStatus} />
       </div>
-      {route === '#/settings' && <Settings />}
+      {route === '#/settings' && <Settings session={status} />}
     </>
   )
 }
