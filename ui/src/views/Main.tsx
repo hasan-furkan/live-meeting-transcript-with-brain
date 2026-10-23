@@ -28,6 +28,12 @@ type Card = {
 }
 type Summary = { path?: string; error?: string }
 
+/** -60 dBFS (silence) to 0 dBFS (full scale) mapped onto 0–100 %. */
+const levelPercent = (rms: number) =>
+  rms > 0 ? Math.min(100, Math.max(0, ((20 * Math.log10(rms) + 60) / 60) * 100)) : 0
+
+const levelLabel = (rms: number) => (rms > 0 ? `${Math.round(20 * Math.log10(rms))} dB` : '—')
+
 const reasonLabel = (reason: string | undefined) => {
   if (!reason) return 'Manual'
   return reason.charAt(0).toUpperCase() + reason.slice(1)
@@ -76,12 +82,15 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
 
     void onSessionEvent((event) => {
       switch (event.type) {
+        // Recognized speech proves audio is arriving, whatever the level reads.
         case 'Partial':
           setPartial(event.text)
+          setNoAudio(false)
           break
         case 'Line':
           setLines((lines) => [...lines, { time: event.time, text: event.text }].slice(-20))
           setPartial('')
+          setNoAudio(false)
           break
         case 'AnalysisStarted':
           setCards((cards) => [{ id: event.id, time: '', reason: event.reason }, ...cards].slice(0, 30))
@@ -190,7 +199,18 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
           </div>
           <div className="stat">
             <span className="stat-label">Audio level</span>
-            <meter aria-label="Audio level" min={0} max={0.2} value={rms} />
+            <div
+              className="level"
+              role="meter"
+              aria-label="Audio level"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(levelPercent(rms))}
+              aria-valuetext={levelLabel(rms)}
+            >
+              <div className="level-fill" style={{ width: `${levelPercent(rms)}%` }} />
+            </div>
+            <span className="level-db mono">{levelLabel(rms)}</span>
           </div>
           <div className="stat">
             <span className="stat-label">Analyses</span>
@@ -248,13 +268,22 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
                   </div>
                   {card.analysis ? (
                     <>
-                      <p className="question">{card.analysis.question || card.analysis.raw}</p>
-                      <div>
-                        <span className="answer-label">Suggested answer</span>
-                        <p className="answer">{card.analysis.suggested_answer}</p>
-                      </div>
-                      {card.analysis.explanation && (
-                        <p className="explanation">{card.analysis.explanation}</p>
+                      {card.analysis.raw ? (
+                        <>
+                          <span className="answer-label">Unreadable reply from the model</span>
+                          <p className="raw">{card.analysis.raw}</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="question">{card.analysis.question}</p>
+                          <div>
+                            <span className="answer-label">Suggested answer</span>
+                            <p className="answer">{card.analysis.suggested_answer}</p>
+                          </div>
+                          {card.analysis.explanation && (
+                            <p className="explanation">{card.analysis.explanation}</p>
+                          )}
+                        </>
                       )}
                       <div className="card-badges">
                         {card.analysis.confidence && (

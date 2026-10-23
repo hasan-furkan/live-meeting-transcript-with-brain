@@ -17,6 +17,7 @@ vi.mock('../api', () => ({
     screenshot_mode: 'off',
     monitor: null,
     region: null,
+    window: null,
     audio_device: null,
   })),
   saveSettings: vi.fn(async () => {}),
@@ -25,6 +26,7 @@ vi.mock('../api', () => ({
   modelStatus: vi.fn(async () => ({ installed: true, model: 'small' })),
   downloadModel: vi.fn(async () => {}),
   listMonitors: vi.fn(async () => ['Display 1']),
+  listWindows: vi.fn(async () => []),
   listOutputDevices: vi.fn(async () => ['Speakers']),
   openRegionPicker: vi.fn(async () => {}),
   onModelProgress: vi.fn(() => Promise.resolve(() => {})),
@@ -65,6 +67,7 @@ test('refocus_keeps_region_from_picker_and_unsaved_edits', async () => {
     screenshot_mode: 'off',
     monitor: null,
     region,
+    window: null,
     audio_device: null,
   })
   fireEvent(window, new Event('focus'))
@@ -99,4 +102,34 @@ test('settings_save_sends_trimmed_nonempty_variants', async () => {
   expect(saved?.name_variants).toEqual(['Jordan Reyes', 'Al'])
   expect(saved?.keywords).toEqual(['exam'])
   expect(api.setApiKey).not.toHaveBeenCalled()
+})
+
+test('window_mode_lists_windows_and_saves_the_choice', async () => {
+  vi.mocked(api.listWindows).mockResolvedValue([
+    { app: 'Zoom', title: 'Algorithms 101' },
+    { app: 'Firefox', title: 'Course notes' },
+  ])
+  render(<Settings />)
+  await screen.findByText('Key saved')
+  fireEvent.click(screen.getByRole('button', { name: 'Window' }))
+
+  const select = await screen.findByRole('combobox', { name: 'Window' })
+  expect(select).toHaveAttribute('id', 'window-select')
+  expect(screen.getByRole('option', { name: 'Zoom — Algorithms 101' })).toBeInTheDocument()
+  expect(screen.getByRole('option', { name: 'Firefox — Course notes' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Select region' })).toBeNull()
+
+  fireEvent.change(select, { target: { value: JSON.stringify(['Firefox', 'Course notes']) } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(api.saveSettings).toHaveBeenCalled())
+  const saved = vi.mocked(api.saveSettings).mock.calls[0]?.[0]
+  expect(saved?.window).toEqual({ app: 'Firefox', title: 'Course notes' })
+})
+
+test('window_mode_shows_list_windows_error', async () => {
+  vi.mocked(api.listWindows).mockRejectedValue('window list unavailable')
+  render(<Settings />)
+  await screen.findByText('Key saved')
+  fireEvent.click(screen.getByRole('button', { name: 'Window' }))
+  expect(await screen.findByText('window list unavailable')).toBeInTheDocument()
 })

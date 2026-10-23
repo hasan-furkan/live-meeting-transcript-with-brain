@@ -1,9 +1,10 @@
-use crate::llm::json_slice;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-pub const MAX_TOKENS_ASSIST: u32 = 800;
-pub const MAX_TOKENS_CLASSIFY: u32 = 5;
+// Reasoning models spend output tokens on a thinking block before the text: with 800 the
+// JSON was cut off mid-answer, and with 5 the YES/NO never arrived.
+pub const MAX_TOKENS_ASSIST: u32 = 4000;
+pub const MAX_TOKENS_CLASSIFY: u32 = 1000;
 
 const ASSIST_HEAD: &str = "You help a university student during a live English lecture. The student was just addressed by the lecturer. From the transcript excerpt (and the screenshot, if provided) identify the question the lecturer asked the student and write a concise answer the student can say aloud (at most 3 sentences). Reply with ONLY a JSON object: {";
 const ASSIST_FIELDS: &str = "\"question\": string, \"suggested_answer\": string, \"confidence\": \"low\"|\"medium\"|\"high\"";
@@ -77,9 +78,10 @@ struct ParsedAnalysis {
     explanation: Option<String>,
 }
 
+/// Reads the first JSON object in the reply; a cut-off or malformed one is salvaged field
+/// by field, so the card shows text rather than raw JSON.
 pub fn parse_analysis(reply: &str) -> Analysis {
-    let parsed: Option<ParsedAnalysis> =
-        json_slice(reply).and_then(|slice| serde_json::from_str(slice).ok());
+    let parsed = first_object(reply).or_else(|| salvage(reply));
     match parsed {
         Some(parsed) => Analysis {
             question: parsed.question,
@@ -96,6 +98,77 @@ pub fn parse_analysis(reply: &str) -> Analysis {
             raw: Some(reply.to_string()),
         },
     }
+}
+
+/// The first JSON object that carries a question or an answer; `{}` in prose is skipped.
+fn first_object(reply: &str) -> Option<ParsedAnalysis> {
+    reply.match_indices('{').find_map(|(start, _)| {
+        serde_json::Deserializer::from_str(&reply[start..])
+            .into_iter::<ParsedAnalysis>()
+            .next()?
+            .ok()
+            .filter(|parsed| !parsed.question.is_empty() || !parsed.suggested_answer.is_empty())
+    })
+}
+
+fn salvage(reply: &str) -> Option<ParsedAnalysis> {
+    let parsed = ParsedAnalysis {
+        question: string_field(reply, "question").unwrap_or_default(),
+        suggested_answer: string_field(reply, "suggested_answer").unwrap_or_default(),
+        confidence: string_field(reply, "confidence"),
+        explanation: string_field(reply, "explanation"),
+    };
+    (!parsed.question.is_empty() || !parsed.suggested_answer.is_empty()).then_some(parsed)
+}
+
+/// The string value of `"key": "..."`, decoding escapes; a value cut off by the token limit
+/// ends with an ellipsis. Raw newlines, which strict JSON rejects, are kept.
+fn string_field(text: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{key}\"");
+    // Skip mentions that are not `"key": "` (e.g. the schema echoed as `"question": string`).
+    let value = text.match_indices(&pattern).find_map(|(at, _)| {
+        let after_key = &text[at + pattern.len()..];
+        after_key
+            .trim_start()
+            .strip_prefix(':')?
+            .trim_start()
+            .strip_prefix('"')
+    })?;
+    let mut out = String::new();
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out),
+            '\\' => match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('u') => {
+                    let hex: String = chars
+                        .clone()
+                        .take(4)
+                        .take_while(char::is_ascii_hexdigit)
+                        .collect();
+                    for _ in 0..hex.len() {
+                        chars.next();
+                    }
+                    let decoded = (hex.len() == 4)
+                        .then(|| u32::from_str_radix(&hex, 16).ok())
+                        .flatten()
+                        .and_then(char::from_u32);
+                    // shortcut: surrogate pairs (emoji) are dropped; the JSON path handles them.
+                    if let Some(decoded) = decoded {
+                        out.push(decoded);
+                    }
+                }
+                Some(other) => out.push(other),
+                None => break,
+            },
+            other => out.push(other),
+        }
+    }
+    let cut = out.trim_end();
+    (!cut.is_empty()).then(|| format!("{cut}…"))
 }
 
 fn parse_confidence(value: Option<&str>) -> Option<Confidence> {
@@ -147,6 +220,72 @@ mod tests {
         assert_eq!(analysis.suggested_answer, "");
         assert_eq!(analysis.confidence, None);
         assert_eq!(analysis.raw, Some(garbage.to_string()));
+    }
+
+    #[test]
+    fn parse_analysis_ignores_text_and_braces_after_the_object() {
+        let reply = r#"Here you go: {"question":"Q","suggested_answer":"A","confidence":"low"} Note: use {} for dicts."#;
+        let analysis = parse_analysis(reply);
+        assert_eq!(analysis.question, "Q");
+        assert_eq!(analysis.suggested_answer, "A");
+        assert_eq!(analysis.raw, None);
+    }
+
+    #[test]
+    fn parse_analysis_salvages_reply_cut_by_token_limit() {
+        // Real shape from the API when max_tokens ran out mid-answer.
+        let reply = r#"{"question":"How would you count words?","suggested_answer":"Split the sentence: def word_count(s): counts = {}; for w in s.split(): counts[w] = counts.get(w, 0) + "#;
+        let analysis = parse_analysis(reply);
+        assert_eq!(analysis.question, "How would you count words?");
+        assert_eq!(
+            analysis.suggested_answer,
+            "Split the sentence: def word_count(s): counts = {}; for w in s.split(): counts[w] = counts.get(w, 0) +…"
+        );
+        assert_eq!(analysis.confidence, None);
+        assert_eq!(analysis.raw, None);
+    }
+
+    #[test]
+    fn parse_analysis_salvages_raw_newlines_and_escapes() {
+        // A literal newline inside the string makes strict JSON parsing fail.
+        let reply = "{\"question\":\"Say \\\"hi\\\"\",\"suggested_answer\":\"line1\nline2 \\u00e9\",\"confidence\":\"high\"}";
+        let analysis = parse_analysis(reply);
+        assert_eq!(analysis.question, "Say \"hi\"");
+        assert_eq!(analysis.suggested_answer, "line1\nline2 é");
+        assert_eq!(analysis.confidence, Some(Confidence::High));
+        assert_eq!(analysis.raw, None);
+    }
+
+    #[test]
+    fn parse_analysis_skips_empty_object_before_the_answer() {
+        let reply = r#"Use counts = {} then: {"question":"Q","suggested_answer":"A"}"#;
+        let analysis = parse_analysis(reply);
+        assert_eq!(analysis.question, "Q");
+        assert_eq!(analysis.suggested_answer, "A");
+        assert_eq!(analysis.raw, None);
+    }
+
+    #[test]
+    fn salvage_skips_echoed_schema_and_short_unicode_escape() {
+        let reply = "Schema: \"question\": string. {\"question\":\"Q \\u00\",\"suggested_answer\":\"A\nB\"}";
+        let analysis = parse_analysis(reply);
+        assert_eq!(analysis.question, "Q ");
+        assert_eq!(analysis.suggested_answer, "A\nB");
+    }
+
+    #[test]
+    fn salvage_handles_odd_inputs_without_panicking() {
+        for reply in [
+            "",
+            "\"question\"",
+            "\"question\":",
+            "\"question\": \"",
+            "\"question\": \"\\",
+            "{\"question\": \"é",
+        ] {
+            let analysis = parse_analysis(reply);
+            assert_eq!(analysis.suggested_answer, "", "{reply}");
+        }
     }
 
     #[test]

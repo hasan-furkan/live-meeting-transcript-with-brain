@@ -9,8 +9,8 @@ use crate::assist::{
 };
 use crate::capture::{AudioSource, CaptureError};
 use crate::llm::{LlmClient, LlmError, LlmImage};
-use crate::screenshot::{ShotError, capture as capture_screenshot};
-use crate::settings::{Region, ScreenshotMode};
+use crate::screenshot::{ShotConfig, ShotError, capture as capture_screenshot};
+use crate::settings::ScreenshotMode;
 use crate::stt::{
     Backend, SegEvent, Segmenter, Transcriber, Vad, initial_prompt, is_hallucination,
 };
@@ -111,20 +111,21 @@ pub struct SessionConfig {
     pub keywords: Vec<String>,
     pub general_questions: bool,
     pub name_bias: bool,
-    pub screenshot: (ScreenshotMode, Option<String>, Option<Region>),
+    pub screenshot: ShotConfig,
     /// Empty = no explanation in the analysis.
     pub explanation_language: String,
     /// Silence needed before `NoAudio` is reported; production uses 10 s.
     pub no_audio_after: Duration,
 }
 
-/// Trigger settings saved mid-session; the STT thread applies them to the live session.
+/// Trigger and screenshot settings saved mid-session; the STT thread applies them to the live session.
 pub struct LiveTriggers {
     pub names: Vec<String>,
     pub keywords: Vec<String>,
     pub general_questions: bool,
     pub name_bias: bool,
     pub explanation_language: String,
+    pub screenshot: ShotConfig,
 }
 
 pub type Sink = Arc<dyn Fn(SessionEvent) + Send + Sync>;
@@ -408,7 +409,7 @@ struct Worker {
     prompt: Option<String>,
     course: String,
     general_questions: bool,
-    screenshot: (ScreenshotMode, Option<String>, Option<Region>),
+    screenshot: ShotConfig,
     explanation_language: String,
     no_audio_after: Duration,
     question_rate: RateLimiter,
@@ -483,11 +484,13 @@ impl Worker {
             general_questions,
             name_bias,
             explanation_language,
+            screenshot,
         } = triggers;
         self.matcher = Matcher::new(&names, &keywords);
         self.prompt = initial_prompt(&names, name_bias);
         self.general_questions = general_questions;
         self.explanation_language = explanation_language;
+        self.screenshot = screenshot;
     }
 
     fn ingest(&mut self, chunk: &[f32]) {
@@ -618,22 +621,16 @@ impl Worker {
         self.analyze_with(reason, self.screenshot.clone());
     }
 
-    /// A screenshot is always taken: the saved region if one exists, else the whole monitor.
+    /// A screenshot is always taken: the configured window or region, else the whole monitor.
     fn capture_and_ask(&mut self) {
-        let (_, monitor, region) = self.screenshot.clone();
-        let mode = if region.is_some() {
-            ScreenshotMode::Region
-        } else {
-            ScreenshotMode::Full
-        };
-        self.analyze_with("capture", (mode, monitor, region));
+        let mut cfg = self.screenshot.clone();
+        if cfg.mode != ScreenshotMode::Window {
+            cfg.mode = ScreenshotMode::Region;
+        }
+        self.analyze_with("capture", cfg);
     }
 
-    fn analyze_with(
-        &mut self,
-        reason: &str,
-        screenshot: (ScreenshotMode, Option<String>, Option<Region>),
-    ) {
+    fn analyze_with(&mut self, reason: &str, screenshot: ShotConfig) {
         let id = self.ids.fetch_add(1, Ordering::Relaxed);
         (self.sink)(SessionEvent::AnalysisStarted {
             id,
@@ -748,7 +745,7 @@ async fn run_analysis(
     id: u64,
     course: String,
     recent: String,
-    screenshot: (ScreenshotMode, Option<String>, Option<Region>),
+    screenshot: ShotConfig,
     explanation_language: String,
     sink: Sink,
 ) {
@@ -781,16 +778,13 @@ async fn run_analysis(
 }
 
 /// Screenshots are taken on a blocking thread; a failure just means text-only analysis.
-async fn capture_image(
-    (mode, monitor, region): (ScreenshotMode, Option<String>, Option<Region>),
-) -> (ScreenshotStatus, Option<LlmImage>, Option<ShotError>) {
-    if mode == ScreenshotMode::Off {
+async fn capture_image(cfg: ShotConfig) -> (ScreenshotStatus, Option<LlmImage>, Option<ShotError>) {
+    if cfg.mode == ScreenshotMode::Off {
         return (ScreenshotStatus::Off, None, None);
     }
-    let shot =
-        tokio::task::spawn_blocking(move || capture_screenshot(mode, monitor.as_deref(), region))
-            .await
-            .unwrap_or(Err(ShotError::Failed));
+    let shot = tokio::task::spawn_blocking(move || capture_screenshot(&cfg))
+        .await
+        .unwrap_or(Err(ShotError::Failed));
     match shot {
         Ok(Some(image)) => (ScreenshotStatus::Attached, Some(image), None),
         Ok(None) => (ScreenshotStatus::Off, None, None),

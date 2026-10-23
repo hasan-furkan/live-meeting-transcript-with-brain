@@ -6,6 +6,7 @@ import {
   hasApiKey,
   listMonitors,
   listOutputDevices,
+  listWindows,
   modelStatus,
   onModelProgress,
   openRegionPicker,
@@ -16,6 +17,7 @@ import type { ModelProgress } from '../bindings/ModelProgress'
 import type { ModelStatus } from '../bindings/ModelStatus'
 import type { ScreenshotMode } from '../bindings/ScreenshotMode'
 import type { Settings as SettingsData } from '../bindings/Settings'
+import type { WindowTarget } from '../bindings/WindowTarget'
 import Header, { type SessionStatus } from '../components/Header'
 
 const NOTICE =
@@ -28,7 +30,11 @@ const MODES: { value: ScreenshotMode; label: string }[] = [
   { value: 'off', label: 'Off' },
   { value: 'region', label: 'Region' },
   { value: 'full', label: 'Full' },
+  { value: 'window', label: 'Window' },
 ]
+
+const windowKey = (target: WindowTarget) => JSON.stringify([target.app, target.title])
+const windowLabel = (target: WindowTarget) => `${target.app} — ${target.title}`
 
 function Section({
   title,
@@ -56,6 +62,8 @@ function Settings({ session }: { session?: SessionStatus }) {
   const [key, setKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
   const [monitors, setMonitors] = useState<string[]>([])
+  const [windows, setWindows] = useState<WindowTarget[]>([])
+  const [windowsError, setWindowsError] = useState('')
   const [devices, setDevices] = useState<string[]>([])
   const [model, setModel] = useState<ModelStatus | null>(null)
   const [progress, setProgress] = useState<ModelProgress | null>(null)
@@ -72,6 +80,11 @@ function Settings({ session }: { session?: SessionStatus }) {
     )
   }, [])
 
+  const refreshWindows = useCallback(() => {
+    setWindowsError('')
+    void listWindows().then(setWindows, (cause: unknown) => setWindowsError(String(cause)))
+  }, [])
+
   useEffect(() => {
     const loaded = (fresh: SettingsData) => {
       setSettings(fresh)
@@ -82,6 +95,7 @@ function Settings({ session }: { session?: SessionStatus }) {
     window.addEventListener('focus', refreshRegion)
     void hasApiKey().then(setKeySaved, () => {})
     void listMonitors().then(setMonitors, () => {})
+    void listWindows().then(setWindows, (cause: unknown) => setWindowsError(String(cause)))
     void listOutputDevices().then(setDevices, () => {})
     void modelStatus().then(setModel, () => {})
     let active = true
@@ -113,6 +127,13 @@ function Settings({ session }: { session?: SessionStatus }) {
     setSettings((current) => (current ? { ...current, ...change } : current))
 
   const dirty = saved !== null && JSON.stringify(settings) !== JSON.stringify(saved)
+
+  // The saved window stays choosable even when it is not open right now.
+  const chosen = settings.window
+  const windowOptions =
+    chosen && !windows.some((target) => windowKey(target) === windowKey(chosen))
+      ? [chosen, ...windows]
+      : windows
 
   const save = async (event: FormEvent) => {
     event.preventDefault()
@@ -358,6 +379,38 @@ function Settings({ session }: { session?: SessionStatus }) {
                 ))}
               </div>
             </div>
+            {settings.screenshot_mode === 'window' ? (
+              <div className="field">
+                <label htmlFor="window-select">Window</label>
+                <div className="row">
+                  <select
+                    id="window-select"
+                    value={settings.window ? windowKey(settings.window) : ''}
+                    onChange={(event) =>
+                      patch({
+                        window:
+                          windowOptions.find((target) => windowKey(target) === event.target.value) ??
+                          null,
+                      })
+                    }
+                  >
+                    <option value="">Choose a window…</option>
+                    {windowOptions.map((target) => (
+                      <option key={windowKey(target)} value={windowKey(target)}>
+                        {windowLabel(target)}
+                        {windows.includes(target) ? '' : ' (not open now)'}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={refreshWindows}>Refresh</button>
+                </div>
+                <span className="muted">
+                  {windowsError ||
+                    'If the title changes (e.g. a new tab), the largest window of the same app is used.'}
+                </span>
+              </div>
+            ) : (
+            <>
             <label className="field">
               <span>Monitor</span>
               <select
@@ -378,6 +431,8 @@ function Settings({ session }: { session?: SessionStatus }) {
                   : 'No region selected'}
               </span>
             </div>
+            </>
+            )}
           </Section>
 
           <Section

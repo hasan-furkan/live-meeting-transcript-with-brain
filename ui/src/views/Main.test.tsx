@@ -212,6 +212,106 @@ test('no_audio_banner_clears_on_level', () => {
   expect(screen.queryByText('No audio detected — check the output device')).toBeNull()
 })
 
+test('unreadable_reply_shows_raw_text_without_suggested_answer', () => {
+  render(<Main />)
+  send({ type: 'AnalysisStarted', id: 1, reason: 'question' })
+  send({
+    type: 'Analysis',
+    id: 1,
+    time: '10:00',
+    analysis: {
+      question: '',
+      suggested_answer: '',
+      confidence: null,
+      explanation: null,
+      raw: 'I could not answer that.',
+    },
+    screenshot: 'off',
+    image: null,
+  })
+  expect(screen.getByText('Unreadable reply from the model')).toBeInTheDocument()
+  expect(screen.getByText('I could not answer that.')).toBeInTheDocument()
+  expect(screen.queryByText('Suggested answer')).toBeNull()
+})
+
+test('parsed_reply_shows_question_and_suggested_answer', () => {
+  render(<Main />)
+  send({ type: 'AnalysisStarted', id: 1, reason: 'question' })
+  send({
+    type: 'Analysis',
+    id: 1,
+    time: '10:00',
+    analysis: {
+      question: 'What is a heap?',
+      suggested_answer: 'A tree with the heap property.',
+      confidence: 'high',
+      explanation: null,
+      raw: null,
+    },
+    screenshot: 'off',
+    image: null,
+  })
+  expect(screen.getByText('What is a heap?')).toBeInTheDocument()
+  expect(screen.getByText('A tree with the heap property.')).toBeInTheDocument()
+  expect(screen.getByText('Suggested answer')).toBeInTheDocument()
+  expect(screen.queryByText('Unreadable reply from the model')).toBeNull()
+})
+
+test('raw_reply_html_is_escaped', () => {
+  render(<Main />)
+  send({ type: 'AnalysisStarted', id: 1, reason: 'question' })
+  send({
+    type: 'Analysis',
+    id: 1,
+    time: '10:00',
+    analysis: {
+      question: '',
+      suggested_answer: '',
+      confidence: null,
+      explanation: null,
+      raw: '<img src=x onerror=alert(1)>',
+    },
+    screenshot: 'off',
+    image: null,
+  })
+  expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument()
+  expect(document.querySelector('img')).toBeNull()
+})
+
+test('no_audio_banner_clears_on_line_without_level', () => {
+  render(<Main />)
+  send({ type: 'NoAudio' })
+  expect(screen.getByText('No audio detected — check the output device')).toBeInTheDocument()
+  send({ type: 'Line', time: '10:00', text: 'Hello class' })
+  expect(screen.queryByText('No audio detected — check the output device')).toBeNull()
+})
+
+test('no_audio_banner_clears_on_partial', () => {
+  render(<Main />)
+  send({ type: 'NoAudio' })
+  expect(screen.getByText('No audio detected — check the output device')).toBeInTheDocument()
+  send({ type: 'Partial', text: 'Hello' })
+  expect(screen.queryByText('No audio detected — check the output device')).toBeNull()
+})
+
+test('audio_level_meter_maps_rms_to_db_and_percent', () => {
+  render(<Main />)
+  const meter = screen.getByRole('meter', { name: 'Audio level' })
+  expect(meter).toHaveAttribute('aria-valuetext', '—')
+  expect(meter).toHaveAttribute('aria-valuenow', '0')
+
+  send({ type: 'Level', rms: 0.1 })
+  expect(meter).toHaveAttribute('aria-valuetext', '-20 dB')
+  expect(meter).toHaveAttribute('aria-valuenow', '67')
+
+  send({ type: 'Level', rms: 0 })
+  expect(meter).toHaveAttribute('aria-valuetext', '—')
+  expect(meter).toHaveAttribute('aria-valuenow', '0')
+
+  send({ type: 'Level', rms: 2 })
+  expect(meter).toHaveAttribute('aria-valuenow', '100')
+})
+
 test('permission_denied_explains_and_opens_system_settings', async () => {
   vi.mocked(api.listCourses).mockResolvedValue(['Algorithms 101'])
   vi.mocked(api.startSession).mockRejectedValueOnce('Screen Recording permission required')

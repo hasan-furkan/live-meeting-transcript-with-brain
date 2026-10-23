@@ -3,6 +3,7 @@
 use chrono::NaiveDate;
 use lma_core::capture::{AudioSource, CaptureError, WavSource};
 use lma_core::llm::LlmClient;
+use lma_core::screenshot::ShotConfig;
 use lma_core::session::{
     LiveTriggers, ScreenshotStatus, Session, SessionConfig, SessionEvent, Sink,
 };
@@ -137,7 +138,7 @@ fn config(notes: &Path) -> SessionConfig {
         keywords: vec!["exam".to_string()],
         general_questions: false,
         name_bias: true,
-        screenshot: (ScreenshotMode::Off, None, None),
+        screenshot: ShotConfig::off(),
         explanation_language: String::new(),
         no_audio_after: Duration::from_secs(60),
     }
@@ -389,7 +390,7 @@ fn capture_and_ask_screenshots_even_when_mode_off() {
     let llm = Arc::new(LlmClient::new(&server.url, "test-key".into(), "test-model"));
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path());
-    assert_eq!(cfg.screenshot.0, ScreenshotMode::Off);
+    assert_eq!(cfg.screenshot.mode, ScreenshotMode::Off);
     let input = Input::default();
     let (session, events) = start_fake(&rt, cfg, FakeTranscriber::new("", &[]), Some(llm), &input);
 
@@ -471,6 +472,7 @@ fn updated_names_apply_to_running_session() {
         general_questions: false,
         name_bias: true,
         explanation_language: String::new(),
+        screenshot: ShotConfig::off(),
     });
     // The command channel is polled on the STT thread's next audio tick.
     std::thread::sleep(Duration::from_millis(400));
@@ -500,6 +502,59 @@ fn updated_names_apply_to_running_session() {
         seen.iter().any(|e| matches!(
             e,
             SessionEvent::Hit { kind: HitKind::Keyword, term, .. } if term == "deadline"
+        )),
+        "{seen:?}"
+    );
+
+    session.stop().unwrap();
+}
+
+#[test]
+fn screenshot_settings_apply_to_running_session() {
+    let rt = Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start(vec![(200, text_reply(ASSIST_JSON))]));
+    let llm = Arc::new(LlmClient::new(&server.url, "test-key".into(), "test-model"));
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path());
+    assert_eq!(cfg.screenshot.mode, ScreenshotMode::Off, "starts off");
+    let input = Input::default();
+    let (session, events) = start_fake(&rt, cfg, FakeTranscriber::new("", &[]), Some(llm), &input);
+
+    session.update_triggers(LiveTriggers {
+        names: vec!["Jordan".to_string()],
+        keywords: vec!["exam".to_string()],
+        general_questions: false,
+        name_bias: true,
+        explanation_language: String::new(),
+        screenshot: ShotConfig {
+            mode: ScreenshotMode::Window,
+            window: None,
+            ..ShotConfig::off()
+        },
+    });
+    // The command channel is polled on the STT thread's next tick.
+    std::thread::sleep(Duration::from_millis(400));
+
+    session.ask_now();
+
+    let seen = wait_for(&events, WAIT, |e| {
+        e.iter().any(|x| matches!(x, SessionEvent::Analysis { .. }))
+    });
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            SessionEvent::Error { message }
+                if message.starts_with("Screenshot failed: window not found")
+        )),
+        "the Window mode saved mid-session must be used: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            SessionEvent::Analysis {
+                screenshot: ScreenshotStatus::Failed,
+                ..
+            }
         )),
         "{seen:?}"
     );

@@ -8,10 +8,11 @@ use crate::state::{
 use chrono::Local;
 use lma_core::capture::{CaptureError, list_output_devices as core_output_devices, system_source};
 use lma_core::llm::{LlmClient, validate_api_base_url};
-use lma_core::screenshot::capture_monitor_full;
+use lma_core::screenshot::{ShotConfig, capture_monitor_full};
 use lma_core::session::{LiveTriggers, Session, SessionConfig, SessionError, SessionEvent, Sink};
 use lma_core::settings::{
-    Region, Settings, get_api_key, save as save_settings_file, set_api_key as store_api_key,
+    Region, Settings, WindowTarget, get_api_key, save as save_settings_file,
+    set_api_key as store_api_key,
 };
 use lma_core::stt::{
     EarshotVad, SttError, WhisperTranscriber, download_model as download_whisper_model,
@@ -113,18 +114,23 @@ pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), Strin
             return Err(INVALID_HOTKEY.to_string());
         }
     }
-    let live = LiveTriggers {
-        names: settings.name_variants.clone(),
-        keywords: settings.keywords.clone(),
-        general_questions: settings.general_questions,
-        name_bias: settings.name_bias,
-        explanation_language: settings.explanation_language.clone(),
-    };
-    *lock(&state.settings) = settings;
-    if let Some(session) = lock(&state.session).as_ref() {
-        session.update_triggers(live);
-    }
+    *lock(&state.settings) = settings.clone();
+    push_live(&state, &settings);
     Ok(())
+}
+
+/// Hands trigger and screenshot settings to a running session, if any.
+fn push_live(state: &AppState, settings: &Settings) {
+    if let Some(session) = lock(&state.session).as_ref() {
+        session.update_triggers(LiveTriggers {
+            names: settings.name_variants.clone(),
+            keywords: settings.keywords.clone(),
+            general_questions: settings.general_questions,
+            name_bias: settings.name_bias,
+            explanation_language: settings.explanation_language.clone(),
+            screenshot: ShotConfig::from_settings(settings),
+        });
+    }
 }
 
 #[tauri::command]
@@ -190,11 +196,7 @@ async fn start_session_inner(
         keywords: settings.keywords.clone(),
         general_questions: settings.general_questions,
         name_bias: settings.name_bias,
-        screenshot: (
-            settings.screenshot_mode.clone(),
-            settings.monitor.clone(),
-            settings.region.clone(),
-        ),
+        screenshot: ShotConfig::from_settings(&settings),
         explanation_language: settings.explanation_language.clone(),
         no_audio_after: Duration::from_secs(10),
     };
@@ -352,6 +354,15 @@ pub fn list_monitors() -> Result<Vec<String>, String> {
     lma_core::screenshot::list_monitors().map_err(|error| error.to_string())
 }
 
+/// Async: enumerating windows can block for a moment on macOS.
+#[tauri::command]
+pub async fn list_windows() -> Result<Vec<WindowTarget>, String> {
+    tauri::async_runtime::spawn_blocking(lma_core::screenshot::list_windows)
+        .await
+        .map_err(|_| "Could not list windows".to_string())?
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn list_output_devices() -> Vec<String> {
     core_output_devices()
@@ -424,7 +435,8 @@ pub fn save_region(app: AppHandle, region: Region) -> Result<(), String> {
     let mut settings = lock(&state.settings).clone();
     settings.region = Some(region);
     save_settings_file(&state.settings_path, &settings).map_err(|_| SAVE_FAILED.to_string())?;
-    *lock(&state.settings) = settings;
+    *lock(&state.settings) = settings.clone();
+    push_live(&state, &settings);
     if let Some(window) = app.get_webview_window("region") {
         let _ = window.close();
     }

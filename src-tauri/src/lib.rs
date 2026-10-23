@@ -96,6 +96,7 @@ pub fn run() {
             commands::download_model,
             commands::open_screen_recording_settings,
             commands::list_monitors,
+            commands::list_windows,
             commands::list_output_devices,
             commands::open_region_picker,
             commands::region_snapshot,

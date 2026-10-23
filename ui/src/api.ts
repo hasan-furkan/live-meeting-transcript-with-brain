@@ -6,6 +6,7 @@ import type { Region } from './bindings/Region'
 import type { RegionSnapshot } from './bindings/RegionSnapshot'
 import type { SessionEvent } from './bindings/SessionEvent'
 import type { Settings } from './bindings/Settings'
+import type { WindowTarget } from './bindings/WindowTarget'
 
 export const getSettings = () => invoke<Settings>('get_settings')
 export const saveSettings = (settings: Settings) => invoke('save_settings', { settings })
@@ -22,6 +23,7 @@ export const modelStatus = () => invoke<ModelStatus>('model_status')
 export const downloadModel = () => invoke('download_model', { force: true })
 export const openScreenRecordingSettings = () => invoke('open_screen_recording_settings')
 export const listMonitors = () => invoke<string[]>('list_monitors')
+export const listWindows = () => invoke<WindowTarget[]>('list_windows')
 export const listOutputDevices = () => invoke<string[]>('list_output_devices')
 export const openRegionPicker = () => invoke('open_region_picker')
 export const regionSnapshot = () => invoke<RegionSnapshot>('region_snapshot')

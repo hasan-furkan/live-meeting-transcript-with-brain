@@ -11,6 +11,7 @@ pub enum ScreenshotMode {
     Off,
     Region,
     Full,
+    Window,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -20,6 +21,14 @@ pub struct Region {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+}
+
+/// A window chosen by app name and title; titles change, so the app name is the fallback.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct WindowTarget {
+    pub app: String,
+    pub title: String,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -40,6 +49,7 @@ pub struct Settings {
     pub screenshot_mode: ScreenshotMode,
     pub monitor: Option<String>,
     pub region: Option<Region>,
+    pub window: Option<WindowTarget>,
     pub audio_device: Option<String>,
 }
 
@@ -69,6 +79,7 @@ impl Default for Settings {
             screenshot_mode: ScreenshotMode::Off,
             monitor: None,
             region: None,
+            window: None,
             audio_device: None,
         }
     }

@@ -32,6 +32,7 @@ vi.mock('./api', () => ({
   modelStatus: vi.fn(async () => ({ installed: false, model: 'small' })),
   downloadModel: vi.fn(async () => {}),
   listMonitors: vi.fn(async () => []),
+  listWindows: vi.fn(async () => []),
   listOutputDevices: vi.fn(async () => []),
   openRegionPicker: vi.fn(async () => {}),
   saveRegion: vi.fn(async () => {}),
