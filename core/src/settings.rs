@@ -23,10 +23,13 @@ pub struct Region {
     pub height: u32,
 }
 
-/// A window chosen by app name and title; titles change, so the app name is the fallback.
+/// A window chosen by app name and title; the id keeps following it when the title changes.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct WindowTarget {
+    // The OS window id; absent in settings files written before ids were kept.
+    #[serde(default)]
+    pub id: Option<u32>,
     pub app: String,
     pub title: String,
 }
@@ -230,6 +233,24 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(loaded, expected);
+    }
+
+    #[test]
+    fn window_without_id_still_loads() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let without_id = r#"{"window":{"app":"Zoom","title":"Algorithms 101"}}"#;
+        fs::write(&path, without_id).unwrap();
+
+        let loaded = load(&path);
+        assert_eq!(
+            loaded.window,
+            Some(WindowTarget {
+                id: None,
+                app: "Zoom".into(),
+                title: "Algorithms 101".into(),
+            })
+        );
     }
 
     #[test]

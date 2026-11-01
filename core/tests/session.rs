@@ -544,7 +544,7 @@ fn screenshot_settings_apply_to_running_session() {
         seen.iter().any(|e| matches!(
             e,
             SessionEvent::Error { message }
-                if message.starts_with("Screenshot failed: window not found")
+                if message.starts_with("Screenshot failed: the chosen window is not open")
         )),
         "the Window mode saved mid-session must be used: {seen:?}"
     );

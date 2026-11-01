@@ -1,5 +1,7 @@
 # Live Meeting Assistant
 
+English | [Türkçe](README.tr.md)
+
 A desktop companion for online lectures. It listens to your computer's system audio, transcribes it locally with Whisper, alerts you when your name, a keyword or a question addressed to the class comes up, and — on a trigger or the **Ask now** hotkey — asks an LLM for *what was asked* and a *suggested answer*. At the end of the lecture it writes an English summary and the full transcript into your Obsidian vault. It works with any meeting app (Teams, Zoom, a browser player), since it captures what the speakers play.
 
 ## Features
@@ -13,7 +15,7 @@ A desktop companion for online lectures. It listens to your computer's system au
 ## Privacy
 
 - **Audio never leaves the computer and is never written to disk.** It lives in an in-memory ring buffer and is dropped after transcription.
-- **Screenshots are off by default and never written to disk.** They are captured in memory and dropped after the request. Only a selected region or the full monitor is captured, and only when explicitly enabled.
+- **Screenshots are off by default and never written to disk.** They are captured in memory and dropped after the request. Only a selected region, a selected window or the full monitor is captured, and only when explicitly enabled.
 - **Text does go to the LLM provider you configure** (default OpenCode Go): the last ~350 words for each analysis, the last ~150 words for general-question classification, the full transcript when producing the summary, and the screenshot region if enabled. No audio is sent.
 - **The API key is stored in the OS keychain** (Windows Credential Manager / macOS Keychain), never in settings JSON or logs. Settings live in the OS app-config directory; Whisper models live in the OS app-data directory.
 - **This repository contains no lecture data**, settings, transcripts, keys or model files. `.gitignore` keeps them out.
@@ -30,7 +32,7 @@ On first run open **Settings**, enter your API key, download the Whisper model a
 ## Requirements (building from source)
 
 - **Windows 11**: NVIDIA GPU + CUDA Toolkit 12.x recommended (the release build enables CUDA); works on CPU without them.
-- **macOS 13+** on Apple Silicon (Metal). Grant **Screen Recording** permission in System Settings → Privacy & Security for system audio capture and screenshots; without it the app reports a permission error.
+- **macOS 13+** on Apple Silicon (Metal); the Window screenshot mode needs macOS 14 or later. Grant **Screen Recording** permission in System Settings → Privacy & Security for system audio capture and screenshots; without it the app reports a permission error.
 - **Rust** stable (1.90 or newer) and the **Tauri CLI** (`cargo install tauri-cli --version ^2`).
 - **Node 22**.
 - **CMake** and **libclang** for building whisper-rs.
@@ -67,8 +69,10 @@ The gate must end with `CHECK PASSED`.
 2. Download the Whisper model (default `large-v3-turbo-q5_0`) with the **Download** button. Models are fetched from the whisper.cpp repository on Hugging Face and checksum-verified.
 3. Choose your **notes folder**, e.g. `<vault>/okul`. Courses are the subfolders of this folder.
 4. Add your **name variants**, adjust the **keywords** (defaults: homework, assignment, exam, quiz, deadline, attendance) and optionally the **hotkey**. Optionally set an **explanation language** (e.g. Turkish, Deutsch) to get a 1–2 sentence explanation under each suggested answer; leave it empty to turn it off.
-5. Choose a **screenshot mode**: Off (default), Region (pick a screen region) or Full, and the monitor to capture.
+5. Choose a **screenshot mode**: Off (default), Region (pick a screen region), Window (pick a window by name) or Full, and the monitor to capture. Window captures one chosen window by name; on macOS it needs macOS 14 or later.
 6. Pick a course and press **Start**. The app listens while the window is hidden in the tray; closing the window does not stop a session.
+
+**Window screenshots:** a chosen window can be captured while it sits behind other windows, but Chromium based apps may stop drawing a window you are not looking at. When that happens the app reports it instead of sending a black picture, and Settings offers a restart-command workaround that is not yet tested with Microsoft Teams.
 
 ## Vault output
 

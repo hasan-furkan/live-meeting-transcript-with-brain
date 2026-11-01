@@ -22,6 +22,14 @@ function send(event: SessionEvent) {
   act(() => handler(event))
 }
 
+async function startSessionInUi() {
+  vi.mocked(api.listCourses).mockResolvedValue(['Algorithms 101'])
+  render(<Main />)
+  fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Algorithms 101' }))
+  await screen.findByRole('button', { name: 'Stop' })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -106,8 +114,8 @@ test('analysis_card_shows_the_screenshot_status', () => {
   send({ type: 'Analysis', id: 3, time: '10:02', analysis, screenshot: 'off', image: null })
   const cards = screen.getAllByTestId('analysis-card')
   expect(cards[0]).not.toHaveTextContent('screenshot')
-  expect(cards[1]).toHaveTextContent('📷 screenshot failed')
-  expect(cards[2]).toHaveTextContent('📷 with screenshot')
+  expect(cards[1]).toHaveTextContent('screenshot failed')
+  expect(cards[2]).toHaveTextContent('with screenshot')
 })
 
 test('capture_and_ask_button_calls_the_command_while_running', async () => {
@@ -350,4 +358,50 @@ test('retry_button_disappears_when_a_new_session_starts', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Algorithms 101' }))
   await screen.findByRole('button', { name: 'Stop' })
   expect(screen.queryByRole('button', { name: 'Retry summary' })).toBeNull()
+})
+
+test('stop_shows_the_saving_popup_until_the_summary_is_written', async () => {
+  await startSessionInUi()
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  const popup = screen.getByRole('status')
+  expect(popup).toHaveTextContent('Saving your notes…')
+  expect(popup).toHaveTextContent('Writing the summary and transcript. You can keep working.')
+  expect(popup).toHaveTextContent('0s')
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled())
+  send({ type: 'SummaryWritten', path: '/notes/algorithms-101.md' })
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(screen.getByText('/notes/algorithms-101.md')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled()
+})
+
+test('summary_failed_hides_the_saving_popup_and_offers_retry', async () => {
+  await startSessionInUi()
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  expect(screen.getByRole('status')).toBeInTheDocument()
+  send({ type: 'SummaryFailed', error: 'network error' })
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Retry summary' })).toBeInTheDocument()
+  expect(screen.getByText(/network error/)).toBeInTheDocument()
+})
+
+test('stop_failure_hides_the_saving_popup_and_shows_the_error', async () => {
+  vi.mocked(api.listCourses).mockResolvedValue(['Algorithms 101'])
+  vi.mocked(api.stopSession).mockRejectedValueOnce('stop failed')
+  render(<Main />)
+  fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Algorithms 101' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+  await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  expect(screen.getByText('stop failed')).toBeInTheDocument()
+})
+
+test('hide_hides_the_popup_and_start_stays_disabled_until_the_event', async () => {
+  await startSessionInUi()
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+  expect(screen.queryByRole('status')).toBeNull()
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled())
+  send({ type: 'SummaryWritten', path: '/notes/algorithms-101.md' })
+  expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled()
+  expect(screen.getByText('/notes/algorithms-101.md')).toBeInTheDocument()
 })

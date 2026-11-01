@@ -12,7 +12,7 @@ function Header({ active, status = IDLE }: Props) {
     <header className="topbar">
       <div className="brand">
         <span className="logo-mark" aria-hidden="true" />
-        <h1>Live Meeting Assistant</h1>
+        <span className="brand-name">Live Meeting Assistant</span>
       </div>
       <nav className="tabs" aria-label="Primary">
         <a
@@ -32,7 +32,9 @@ function Header({ active, status = IDLE }: Props) {
       </nav>
       <span className={status.running ? 'status-pill live' : 'status-pill'}>
         <span className="dot" aria-hidden="true" />
-        {status.running ? `Recording · ${status.course}` : 'Idle'}
+        <span className="status-text">
+          {status.running ? `Recording · ${status.course}` : 'Idle'}
+        </span>
       </span>
     </header>
   )

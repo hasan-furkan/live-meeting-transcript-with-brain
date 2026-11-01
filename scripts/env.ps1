@@ -11,5 +11,10 @@ if ($IsWindows -or $env:OS -eq 'Windows_NT') {
         if ($clang) { $env:LIBCLANG_PATH = $clang.DirectoryName }
         else { Write-Warning 'libclang not found: run `py -m pip install --user libclang` (or install LLVM), or set LIBCLANG_PATH.' }
     }
-    if (-not $env:CMAKE_GENERATOR -and -not (Get-Command ninja -ErrorAction SilentlyContinue)) { $env:CMAKE_GENERATOR = 'Visual Studio 17 2022' }
+    if (-not $env:CMAKE_GENERATOR -and -not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+        $vsDirs = @(Get-ChildItem 'C:\Program Files\Microsoft Visual Studio' -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+        if ($vsDirs -contains '18') { $env:CMAKE_GENERATOR = 'Visual Studio 18 2026' }
+        elseif ($vsDirs -contains '2022') { $env:CMAKE_GENERATOR = 'Visual Studio 17 2022' }
+        else { Write-Warning 'Visual Studio 2022/2026 not found: set CMAKE_GENERATOR or install ninja.' }
+    }
 }

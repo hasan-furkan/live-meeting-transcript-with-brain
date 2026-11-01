@@ -13,6 +13,7 @@ import type { Backend } from '../bindings/Backend'
 import type { ScreenshotStatus } from '../bindings/ScreenshotStatus'
 import CoursePicker from '../components/CoursePicker'
 import Header, { type SessionStatus } from '../components/Header'
+import Icon from '../components/Icon'
 
 const SCREEN_RECORDING_ERROR = 'Screen Recording permission required'
 
@@ -52,6 +53,9 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
   const [noAudio, setNoAudio] = useState(false)
   const [error, setError] = useState('')
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveHidden, setSaveHidden] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
   const [zoom, setZoom] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLOListElement>(null)
 
@@ -73,6 +77,13 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
     const list = transcriptRef.current
     if (list) list.scrollTop = list.scrollHeight
   }, [lines, partial])
+
+  // Ticks the elapsed-seconds counter while notes are being saved.
+  useEffect(() => {
+    if (!saving) return
+    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [saving])
 
   useEffect(() => {
     let active = true
@@ -121,9 +132,11 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
           break
         case 'SummaryWritten':
           setSummary({ path: event.path })
+          setSaving(false)
           break
         case 'SummaryFailed':
           setSummary({ error: event.error })
+          setSaving(false)
           break
         default:
           break
@@ -153,10 +166,15 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
   }
 
   const stop = async () => {
+    setSaveHidden(false)
+    setSummary(null)
+    setElapsed(0)
+    setSaving(true)
     try {
       await stopSession()
     } catch (cause) {
       setError(String(cause))
+      setSaving(false)
     } finally {
       setRunning(false)
     }
@@ -171,11 +189,16 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
   }
 
   const retry = async () => {
+    setSaveHidden(false)
     setSummary(null)
+    setElapsed(0)
+    setSaving(true)
     try {
       await retrySummary()
     } catch (cause) {
       setSummary({ error: String(cause) })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -183,79 +206,110 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
 
   return (
     <div className="app">
+      <div className="backdrop" aria-hidden="true" />
       <Header active="live" status={{ running, course }} />
 
-      <main className="page">
-        <section className="stats" aria-label="Session overview">
-          <div className="stat">
-            <span className="stat-label">Session</span>
-            <span className="stat-value mono">{course || '—'}</span>
+      <main className="page live">
+        <section className="session-band" aria-label="Session overview">
+          <div className="session-main">
+            <span className="band-label">Session</span>
+            <h1>{course || 'No session running'}</h1>
+            <p className="band-sentence">
+              {running
+                ? 'Transcribing system audio on this computer.'
+                : 'Start a session to transcribe the meeting and get suggested answers.'}
+            </p>
           </div>
-          <div className="stat">
-            <span className="stat-label">Speech engine</span>
-            <span className={backend === 'Cpu' ? 'stat-value mono warn' : 'stat-value mono'}>
-              {engine}
-            </span>
-          </div>
-          <div className="stat">
-            <span className="stat-label">Audio level</span>
-            <div
-              className="level"
-              role="meter"
-              aria-label="Audio level"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(levelPercent(rms))}
-              aria-valuetext={levelLabel(rms)}
-            >
-              <div className="level-fill" style={{ width: `${levelPercent(rms)}%` }} />
+          <div className="metrics">
+            <div className="metric">
+              <span className="metric-label">Speech engine</span>
+              <span className={backend === 'Cpu' ? 'metric-value mono warn' : 'metric-value mono'}>
+                {engine}
+              </span>
             </div>
-            <span className="level-db mono">{levelLabel(rms)}</span>
+            <div className="metric">
+              <span className="metric-label">Audio level</span>
+              <div className="level-row">
+                <div
+                  className="level"
+                  role="meter"
+                  aria-label="Audio level"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(levelPercent(rms))}
+                  aria-valuetext={levelLabel(rms)}
+                >
+                  <div className="level-fill" style={{ width: `${levelPercent(rms)}%` }} />
+                </div>
+                <span className="level-db mono">{levelLabel(rms)}</span>
+              </div>
+            </div>
+            <div className="metric">
+              <span className="metric-label">Analyses</span>
+              <span className="metric-value mono">{cards.length}</span>
+            </div>
           </div>
-          <div className="stat">
-            <span className="stat-label">Analyses</span>
-            <span className="stat-value mono">{cards.length}</span>
+          <div className="band-action">
+            {running ? (
+              <button className="danger" onClick={() => void stop()} disabled={saving}>
+                <Icon name="stop" />
+                Stop
+              </button>
+            ) : (
+              <button className="primary" onClick={() => setPicking(true)} disabled={saving}>
+                <Icon name="play" />
+                Start
+              </button>
+            )}
           </div>
         </section>
 
-        <div className="columns">
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Live transcript</h2>
-              {running ? (
-                <button className="danger" onClick={() => void stop()}>Stop</button>
-              ) : (
-                <button className="primary" onClick={() => setPicking(true)}>
-                  Start
-                </button>
-              )}
-            </div>
-            <ol className="transcript" ref={transcriptRef}>
-              {lines.map((line, index) => (
-                <li key={`${line.time}-${index}`}>
-                  <span className="line-time">{line.time}</span>
-                  <span className="line-text">{line.text}</span>
-                </li>
-              ))}
-            </ol>
-            {partial && <p className="partial">{partial}</p>}
+        {startError === SCREEN_RECORDING_ERROR && (
+          <section className="notice-card" aria-label="Screen Recording permission">
+            <p>
+              macOS needs Screen Recording permission to capture system audio. Grant it, then
+              restart the app.
+            </p>
+            <button onClick={() => void openScreenRecordingSettings()}>
+              Open System Settings
+            </button>
           </section>
+        )}
 
-          <section className="panel">
+        <div className="columns">
+          <section className="panel panel-answers">
             <div className="panel-head">
               <h2>Questions &amp; suggested answers</h2>
-              <button onClick={() => void ask(askNow)} disabled={!running}>
-                Ask now
-              </button>
-              <button
-                onClick={() => void ask(captureAndAsk)}
-                disabled={!running}
-                title="Takes a screenshot of the selected region (or the whole screen) and asks about it"
-              >
-                Capture &amp; ask
-              </button>
+              <div className="head-actions">
+                <button
+                  className={running ? 'primary' : undefined}
+                  onClick={() => void ask(askNow)}
+                  disabled={!running}
+                >
+                  <Icon name="sparkle" />
+                  Ask now
+                </button>
+                <button
+                  onClick={() => void ask(captureAndAsk)}
+                  disabled={!running}
+                  title="Takes a screenshot of the selected region (or the whole screen) and asks about it"
+                >
+                  <Icon name="camera" />
+                  Capture &amp; ask
+                </button>
+              </div>
             </div>
             <ul className="cards">
+              {cards.length === 0 && (
+                <li className="empty-state">
+                  <h3>No answers yet</h3>
+                  <p>
+                    {running
+                      ? 'Listening for questions. You can also press Ask now.'
+                      : 'Questions you are asked will appear here with a suggested answer.'}
+                  </p>
+                </li>
+              )}
               {cards.map((card) => (
                 <li
                   key={card.id}
@@ -290,10 +344,16 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
                           <span className="badge">{card.analysis.confidence}</span>
                         )}
                         {card.screenshot === 'attached' && (
-                          <span className="badge ok">📷 with screenshot</span>
+                          <span className="badge ok">
+                            <Icon name="camera" size={16} />
+                            with screenshot
+                          </span>
                         )}
                         {card.screenshot === 'failed' && (
-                          <span className="badge warn">📷 screenshot failed</span>
+                          <span className="badge warn">
+                            <Icon name="camera" size={16} />
+                            screenshot failed
+                          </span>
                         )}
                       </div>
                       {card.image && (
@@ -315,19 +375,37 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
               ))}
             </ul>
           </section>
-        </div>
 
-        {startError === SCREEN_RECORDING_ERROR && (
-          <section className="card notice-card" aria-label="Screen Recording permission">
-            <p>
-              macOS needs Screen Recording permission to capture system audio. Grant it, then
-              restart the app.
-            </p>
-            <button onClick={() => void openScreenRecordingSettings()}>
-              Open System Settings
-            </button>
+          <section className="panel panel-transcript">
+            <div className="panel-head">
+              <h2>Live transcript</h2>
+            </div>
+            <ol className="transcript" ref={transcriptRef}>
+              {lines.map((line, index) => (
+                <li key={`${line.time}-${index}`}>
+                  <span className="line-time">{line.time}</span>
+                  <span className="line-text">{line.text}</span>
+                </li>
+              ))}
+              {lines.length === 0 && !partial && (
+                <li className="empty-state">
+                  <h3>Nothing transcribed yet</h3>
+                  <p>
+                    {running
+                      ? 'Waiting for speech.'
+                      : 'The transcript appears here when a session is running.'}
+                  </p>
+                </li>
+              )}
+              {partial && (
+                <li className="partial-line">
+                  <span className="line-time" />
+                  <span className="line-text partial">{partial}</span>
+                </li>
+              )}
+            </ol>
           </section>
-        )}
+        </div>
 
         {picking && (
           <CoursePicker
@@ -357,6 +435,16 @@ function Main({ onStatusChange }: { onStatusChange?: (status: SessionStatus) => 
           )}
         </div>
       </footer>
+
+      {saving && !saveHidden && (
+        <div className="saving-popup" role="status" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
+          <p className="saving-title">Saving your notes…</p>
+          <p className="saving-detail">Writing the summary and transcript. You can keep working.</p>
+          <p className="saving-elapsed mono">{elapsed}s</p>
+          <button onClick={() => setSaveHidden(true)}>Hide</button>
+        </div>
+      )}
 
       {zoom && (
         <div className="overlay" role="dialog" aria-label="Screenshot" onClick={() => setZoom(null)}>

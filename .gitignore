@@ -16,3 +16,4 @@ notes/
 okul/
 *.wav
 !tests/fixtures/*.wav
+reports/

@@ -8,7 +8,10 @@ use crate::state::{
 use chrono::Local;
 use lma_core::capture::{CaptureError, list_output_devices as core_output_devices, system_source};
 use lma_core::llm::{LlmClient, validate_api_base_url};
-use lma_core::screenshot::{ShotConfig, capture_monitor_full};
+use lma_core::screenshot::{
+    BackgroundHint, ShotConfig, WindowList, background_capture_hint as core_background_hint,
+    capture_monitor_full,
+};
 use lma_core::session::{LiveTriggers, Session, SessionConfig, SessionError, SessionEvent, Sink};
 use lma_core::settings::{
     Region, Settings, WindowTarget, get_api_key, save as save_settings_file,
@@ -356,11 +359,22 @@ pub fn list_monitors() -> Result<Vec<String>, String> {
 
 /// Async: enumerating windows can block for a moment on macOS.
 #[tauri::command]
-pub async fn list_windows() -> Result<Vec<WindowTarget>, String> {
-    tauri::async_runtime::spawn_blocking(lma_core::screenshot::list_windows)
-        .await
-        .map_err(|_| "Could not list windows".to_string())?
-        .map_err(|error| error.to_string())
+pub async fn list_windows(
+    include_hidden: bool,
+    current: Option<WindowTarget>,
+) -> Result<WindowList, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        lma_core::screenshot::list_windows(include_hidden, current.as_ref())
+    })
+    .await
+    .map_err(|_| "Could not list windows".to_string())?
+    .map_err(|error| error.to_string())
+}
+
+/// The Settings workaround for a window that comes back black.
+#[tauri::command]
+pub fn background_capture_hint() -> BackgroundHint {
+    core_background_hint()
 }
 
 #[tauri::command]

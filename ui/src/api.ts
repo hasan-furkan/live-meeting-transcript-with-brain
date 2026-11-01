@@ -1,11 +1,13 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { BackgroundHint } from './bindings/BackgroundHint'
 import type { ModelProgress } from './bindings/ModelProgress'
 import type { ModelStatus } from './bindings/ModelStatus'
 import type { Region } from './bindings/Region'
 import type { RegionSnapshot } from './bindings/RegionSnapshot'
 import type { SessionEvent } from './bindings/SessionEvent'
 import type { Settings } from './bindings/Settings'
+import type { WindowList } from './bindings/WindowList'
 import type { WindowTarget } from './bindings/WindowTarget'
 
 export const getSettings = () => invoke<Settings>('get_settings')
@@ -23,7 +25,10 @@ export const modelStatus = () => invoke<ModelStatus>('model_status')
 export const downloadModel = () => invoke('download_model', { force: true })
 export const openScreenRecordingSettings = () => invoke('open_screen_recording_settings')
 export const listMonitors = () => invoke<string[]>('list_monitors')
-export const listWindows = () => invoke<WindowTarget[]>('list_windows')
+export const listWindows = (includeHidden: boolean, current: WindowTarget | null) =>
+  invoke<WindowList>('list_windows', { includeHidden, current })
+export const backgroundCaptureHint = () =>
+  invoke<BackgroundHint>('background_capture_hint')
 export const listOutputDevices = () => invoke<string[]>('list_output_devices')
 export const openRegionPicker = () => invoke('open_region_picker')
 export const regionSnapshot = () => invoke<RegionSnapshot>('region_snapshot')

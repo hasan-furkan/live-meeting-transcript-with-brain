@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
+  backgroundCaptureHint,
   downloadModel,
   getSettings,
   hasApiKey,
@@ -13,12 +14,15 @@ import {
   saveSettings,
   setApiKey,
 } from '../api'
+import type { BackgroundHint } from '../bindings/BackgroundHint'
 import type { ModelProgress } from '../bindings/ModelProgress'
 import type { ModelStatus } from '../bindings/ModelStatus'
 import type { ScreenshotMode } from '../bindings/ScreenshotMode'
 import type { Settings as SettingsData } from '../bindings/Settings'
+import type { WindowList } from '../bindings/WindowList'
 import type { WindowTarget } from '../bindings/WindowTarget'
 import Header, { type SessionStatus } from '../components/Header'
+import Select, { type SelectOption } from '../components/Select'
 
 const NOTICE =
   'Transcript excerpts, the full transcript for summaries, and screenshots (if enabled) are sent to this provider. Audio never leaves this computer.'
@@ -33,7 +37,9 @@ const MODES: { value: ScreenshotMode; label: string }[] = [
   { value: 'window', label: 'Window' },
 ]
 
-const windowKey = (target: WindowTarget) => JSON.stringify([target.app, target.title])
+// The id keeps two windows with the same app and title apart.
+const windowKey = (target: WindowTarget) =>
+  target.id === null ? JSON.stringify([target.app, target.title]) : String(target.id)
 const windowLabel = (target: WindowTarget) => `${target.app} — ${target.title}`
 
 function Section({
@@ -46,10 +52,12 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="card section">
-      <h2>{title}</h2>
-      <p className="section-desc">{description}</p>
-      {children}
+    <section className="section">
+      <div className="section-head">
+        <h2>{title}</h2>
+        <p className="section-desc">{description}</p>
+      </div>
+      <div className="section-body">{children}</div>
     </section>
   )
 }
@@ -62,11 +70,17 @@ function Settings({ session }: { session?: SessionStatus }) {
   const [key, setKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
   const [monitors, setMonitors] = useState<string[]>([])
-  const [windows, setWindows] = useState<WindowTarget[]>([])
+  const [windowList, setWindowList] = useState<WindowList>({ windows: [], current: null })
+  const [windowsLoaded, setWindowsLoaded] = useState(false)
   const [windowsError, setWindowsError] = useState('')
+  // Not saved in settings: it only widens the picker.
+  const [showHiddenWindows, setShowHiddenWindows] = useState(false)
   const [devices, setDevices] = useState<string[]>([])
   const [model, setModel] = useState<ModelStatus | null>(null)
   const [progress, setProgress] = useState<ModelProgress | null>(null)
+  const [hint, setHint] = useState<BackgroundHint | null>(null)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const copyTimer = useRef<number | undefined>(undefined)
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
 
@@ -80,10 +94,31 @@ function Settings({ session }: { session?: SessionStatus }) {
     )
   }, [])
 
-  const refreshWindows = useCallback(() => {
-    setWindowsError('')
-    void listWindows().then(setWindows, (cause: unknown) => setWindowsError(String(cause)))
-  }, [])
+  // The saved choice, so the backend can say which live window it resolves to now.
+  const savedWindow = settings?.window ?? null
+
+  // Only the newest request may write: an older reply that arrives late is stale.
+  const windowsRequest = useRef(0)
+
+  const refreshWindows = useCallback(
+    (hidden: boolean = showHiddenWindows) => {
+      const request = (windowsRequest.current += 1)
+      void listWindows(hidden, savedWindow).then(
+        (list) => {
+          if (request !== windowsRequest.current) return
+          setWindowList(list)
+          setWindowsLoaded(true)
+          setWindowsError('')
+        },
+        // A failed background refresh keeps the last good list.
+        (cause: unknown) => {
+          if (request !== windowsRequest.current) return
+          setWindowsError(String(cause))
+        },
+      )
+    },
+    [savedWindow, showHiddenWindows],
+  )
 
   useEffect(() => {
     const loaded = (fresh: SettingsData) => {
@@ -95,9 +130,10 @@ function Settings({ session }: { session?: SessionStatus }) {
     window.addEventListener('focus', refreshRegion)
     void hasApiKey().then(setKeySaved, () => {})
     void listMonitors().then(setMonitors, () => {})
-    void listWindows().then(setWindows, (cause: unknown) => setWindowsError(String(cause)))
     void listOutputDevices().then(setDevices, () => {})
     void modelStatus().then(setModel, () => {})
+    // Optional help: if the command cannot be fetched, the section is simply absent.
+    void backgroundCaptureHint().then(setHint, () => {})
     let active = true
     let unlisten: (() => void) | undefined
     void onModelProgress((value) => setProgress(value)).then((stop) => {
@@ -109,12 +145,30 @@ function Settings({ session }: { session?: SessionStatus }) {
       unlisten?.()
       window.removeEventListener('focus', refreshRegion)
       window.clearTimeout(savedTimer.current)
+      window.clearTimeout(copyTimer.current)
     }
   }, [refreshRegion])
+
+  // The picker follows the windows that exist right now: on open, on focus, and while Window mode runs.
+  const settingsLoaded = settings !== null
+  const screenshotMode = settings?.screenshot_mode
+  useEffect(() => {
+    if (!settingsLoaded) return
+    refreshWindows()
+    const onFocus = () => refreshWindows()
+    window.addEventListener('focus', onFocus)
+    const timer =
+      screenshotMode === 'window' ? window.setInterval(() => refreshWindows(), 5000) : undefined
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.clearInterval(timer)
+    }
+  }, [settingsLoaded, screenshotMode, refreshWindows])
 
   if (!settings) {
     return (
       <div className="app">
+        <div className="backdrop" aria-hidden="true" />
         <Header active="settings" status={session} />
         <main className="page">
           Loading…{error && <span className="error">{error}</span>}
@@ -127,13 +181,6 @@ function Settings({ session }: { session?: SessionStatus }) {
     setSettings((current) => (current ? { ...current, ...change } : current))
 
   const dirty = saved !== null && JSON.stringify(settings) !== JSON.stringify(saved)
-
-  // The saved window stays choosable even when it is not open right now.
-  const chosen = settings.window
-  const windowOptions =
-    chosen && !windows.some((target) => windowKey(target) === windowKey(chosen))
-      ? [chosen, ...windows]
-      : windows
 
   const save = async (event: FormEvent) => {
     event.preventDefault()
@@ -203,15 +250,58 @@ function Settings({ session }: { session?: SessionStatus }) {
     }
   }
 
+  const copyHint = async () => {
+    if (!hint) return
+    try {
+      await navigator.clipboard.writeText(hint.command)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+    window.clearTimeout(copyTimer.current)
+    copyTimer.current = window.setTimeout(() => setCopyState('idle'), 2000)
+  }
+
+  const copyLabel =
+    copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'
+
+  const windowOptions: SelectOption[] = [
+    { value: '', label: 'Choose a window…' },
+    ...windowList.windows.map((target) => {
+      const suffix = ` - ${target.app}`
+      const secondary = target.title.endsWith(suffix)
+        ? target.title.slice(0, -suffix.length)
+        : target.title
+      return {
+        value: windowKey(target),
+        label: windowLabel(target),
+        primary: target.app,
+        secondary: secondary === '' ? undefined : secondary,
+      }
+    }),
+  ]
+
+  const monitorOptions: SelectOption[] = [
+    { value: '', label: 'Default' },
+    ...monitors.map((monitor) => ({ value: monitor, label: monitor })),
+  ]
+
+  const audioOptions: SelectOption[] = [
+    { value: '', label: 'Default' },
+    ...devices.map((device) => ({ value: device, label: device })),
+  ]
+
   return (
     <div className="app">
+      <div className="backdrop" aria-hidden="true" />
       <Header active="settings" status={session} />
 
       <main className="page settings">
-        <div className="page-head">
+        <header className="page-head">
+          <span className="page-label">Preferences</span>
           <h1>Settings</h1>
           <p>Press Save (or Enter) to apply. Saved trigger changes also apply to a running session.</p>
-        </div>
+        </header>
 
         <form className="settings-form" onSubmit={(event) => void save(event)}>
           <Section
@@ -347,7 +437,7 @@ function Settings({ session }: { session?: SessionStatus }) {
             </label>
           </Section>
 
-          <Section title="Notes folder" description="Where the session summary is written.">
+          <Section title="Notes" description="Where the session summary is written.">
             <label className="field">
               <span>Notes folder</span>
               <input readOnly value={settings.notes_dir ?? ''} />
@@ -383,46 +473,70 @@ function Settings({ session }: { session?: SessionStatus }) {
               <div className="field">
                 <label htmlFor="window-select">Window</label>
                 <div className="row">
-                  <select
+                  <Select
                     id="window-select"
-                    value={settings.window ? windowKey(settings.window) : ''}
-                    onChange={(event) =>
-                      patch({
-                        window:
-                          windowOptions.find((target) => windowKey(target) === event.target.value) ??
-                          null,
-                      })
-                    }
-                  >
-                    <option value="">Choose a window…</option>
-                    {windowOptions.map((target) => (
-                      <option key={windowKey(target)} value={windowKey(target)}>
-                        {windowLabel(target)}
-                        {windows.includes(target) ? '' : ' (not open now)'}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={refreshWindows}>Refresh</button>
+                    value={windowList.current ? windowKey(windowList.current) : ''}
+                    options={windowOptions}
+                    onOpen={() => refreshWindows()}
+                    onChange={(next) => {
+                      const picked = windowList.windows.find(
+                        (target) => windowKey(target) === next,
+                      )
+                      patch({ window: picked ?? null })
+                    }}
+                  />
+                  <button type="button" onClick={() => refreshWindows()}>
+                    Refresh
+                  </button>
                 </div>
+                <p className="muted">
+                  A browser window always shows its open tab. To keep one tab while you use others,
+                  drag that tab out into its own window, then choose that window here.
+                </p>
+                <label className="field check">
+                  <input
+                    type="checkbox"
+                    checked={showHiddenWindows}
+                    onChange={(event) => {
+                      setShowHiddenWindows(event.target.checked)
+                      refreshWindows(event.target.checked)
+                    }}
+                  />
+                  <span>Also show minimized windows and other desktops</span>
+                </label>
+                {savedWindow && windowsLoaded && windowList.current === null && (
+                  <span className="muted">
+                    The saved window is not open. Open it, or choose another.
+                  </span>
+                )}
                 <span className="muted">
                   {windowsError ||
-                    'If the title changes (e.g. a new tab), the largest window of the same app is used.'}
+                    'If the title changes (e.g. a new tab) the app keeps following the same window.'}
                 </span>
+                {hint && (
+                  <details className="hint">
+                    <summary>Window comes back black?</summary>
+                    <p className="muted">{hint.text}</p>
+                    <code className="hint-command">{hint.command}</code>
+                    <div className="row">
+                      <button type="button" onClick={() => void copyHint()}>
+                        {copyLabel}
+                      </button>
+                    </div>
+                  </details>
+                )}
               </div>
             ) : (
             <>
-            <label className="field">
-              <span>Monitor</span>
-              <select
+            <div className="field">
+              <label htmlFor="monitor-select">Monitor</label>
+              <Select
+                id="monitor-select"
                 value={settings.monitor ?? ''}
-                onChange={(event) => patch({ monitor: event.target.value || null })}
-              >
-                <option value="">Default</option>
-                {monitors.map((monitor) => (
-                  <option key={monitor} value={monitor}>{monitor}</option>
-                ))}
-              </select>
-            </label>
+                options={monitorOptions}
+                onChange={(next) => patch({ monitor: next === '' ? null : next })}
+              />
+            </div>
             <div className="row">
               <button type="button" onClick={() => void pickRegion()}>Select region</button>
               <span className="muted">
@@ -448,18 +562,15 @@ function Settings({ session }: { session?: SessionStatus }) {
                   onChange={(event) => patch({ hotkey: event.target.value })}
                 />
               </label>
-              <label className="field">
-                <span>Audio device</span>
-                <select
+              <div className="field">
+                <label htmlFor="audio-select">Audio device</label>
+                <Select
+                  id="audio-select"
                   value={settings.audio_device ?? ''}
-                  onChange={(event) => patch({ audio_device: event.target.value || null })}
-                >
-                  <option value="">Default</option>
-                  {devices.map((device) => (
-                    <option key={device} value={device}>{device}</option>
-                  ))}
-                </select>
-              </label>
+                  options={audioOptions}
+                  onChange={(next) => patch({ audio_device: next === '' ? null : next })}
+                />
+              </div>
             </div>
           </Section>
 

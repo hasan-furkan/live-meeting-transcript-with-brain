@@ -32,12 +32,13 @@ vi.mock('./api', () => ({
   modelStatus: vi.fn(async () => ({ installed: false, model: 'small' })),
   downloadModel: vi.fn(async () => {}),
   listMonitors: vi.fn(async () => []),
-  listWindows: vi.fn(async () => []),
+  listWindows: vi.fn(async () => ({ windows: [], current: null })),
   listOutputDevices: vi.fn(async () => []),
   openRegionPicker: vi.fn(async () => {}),
   saveRegion: vi.fn(async () => {}),
   onSessionEvent: vi.fn(() => Promise.resolve(() => {})),
   onModelProgress: vi.fn(() => Promise.resolve(() => {})),
+  backgroundCaptureHint: vi.fn(async () => ({ text: 'hint', command: 'cmd' })),
 }))
 
 import * as api from './api'
@@ -52,7 +53,7 @@ function send(event: SessionEvent) {
 test('renders the main view by default', () => {
   window.location.hash = ''
   render(<App />)
-  expect(screen.getByRole('heading', { name: 'Live Meeting Assistant' })).toBeInTheDocument()
+  expect(screen.getByText('Live Meeting Assistant')).toBeInTheDocument()
 })
 
 test('settings hash renders the settings view', async () => {
